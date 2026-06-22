@@ -1,7 +1,3 @@
-// Copyright 2024 The Flutter team. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -17,7 +13,7 @@ import 'painter.dart';
 /// monster, gather EXP from the kills and evolve through six escalating life
 /// forms, all the way up to the Ancient Dragon.
 class EvolutionIslandGame extends StatefulWidget {
-  const EvolutionIslandGame({Key key}) : super(key: key);
+  const EvolutionIslandGame({super.key});
 
   @override
   State<EvolutionIslandGame> createState() => _EvolutionIslandGameState();
@@ -28,7 +24,7 @@ class _EvolutionIslandGameState extends State<EvolutionIslandGame>
   static const double islandRadius = 1400;
 
   final math.Random _rng = math.Random();
-  Ticker _ticker;
+  late final Ticker _ticker;
   Duration _lastTick = Duration.zero;
   double _time = 0;
 
@@ -57,8 +53,8 @@ class _EvolutionIslandGameState extends State<EvolutionIslandGame>
   double _spawnTimer = 0;
 
   // ---- Input ----------------------------------------------------------------
-  Offset _joyBase; // null when idle
-  Offset _joyKnob;
+  Offset? _joyBase; // null when idle
+  Offset? _joyKnob;
   Offset _moveDir = Offset.zero;
 
   @override
@@ -211,7 +207,7 @@ class _EvolutionIslandGameState extends State<EvolutionIslandGame>
     // Auto-attack the nearest monster in range.
     _attackTimer -= dt;
     if (_attackTimer <= 0) {
-      final Monster target = _nearestMonster(_stage.attackRange);
+      final Monster? target = _nearestMonster(_stage.attackRange);
       if (target != null) {
         _attackTimer = _stage.attackCooldown;
         _facingRight = target.position.dx >= _playerPos.dx;
@@ -224,8 +220,8 @@ class _EvolutionIslandGameState extends State<EvolutionIslandGame>
     }
   }
 
-  Monster _nearestMonster(double range) {
-    Monster best;
+  Monster? _nearestMonster(double range) {
+    Monster? best;
     double bestDist = range;
     for (final Monster m in _monsters) {
       final double d = (m.position - _playerPos).distance;
@@ -515,15 +511,16 @@ class _EvolutionIslandGameState extends State<EvolutionIslandGame>
   }
 
   void _onPanUpdate(DragUpdateDetails d) {
-    if (_joyBase == null) {
+    final Offset? base = _joyBase;
+    if (base == null) {
       return;
     }
-    final Offset delta = d.localPosition - _joyBase;
+    final Offset delta = d.localPosition - base;
     const double maxR = 60;
     final double dist = delta.distance;
     final Offset clamped = dist > maxR ? normalize(delta) * maxR : delta;
     setState(() {
-      _joyKnob = _joyBase + clamped;
+      _joyKnob = base + clamped;
       _moveDir = dist > 8 ? normalize(delta) : Offset.zero;
     });
   }
@@ -554,7 +551,6 @@ class _EvolutionIslandGameState extends State<EvolutionIslandGame>
                 painter: GamePainter(
                   playerPos: _playerPos,
                   playerStage: _stage,
-                  playerHealthFraction: (_hp / _stage.maxHp),
                   playerFacingRight: _facingRight,
                   playerWobble: _playerWobble,
                   invulnFlash: _invuln,
@@ -587,9 +583,11 @@ class _EvolutionIslandGameState extends State<EvolutionIslandGame>
   }
 
   Widget _buildJoystick() {
+    final Offset base = _joyBase!;
+    final Offset knob = _joyKnob!;
     return Positioned(
-      left: _joyBase.dx - 70,
-      top: _joyBase.dy - 70,
+      left: base.dx - 70,
+      top: base.dy - 70,
       child: IgnorePointer(
         child: SizedBox(
           width: 140,
@@ -607,8 +605,8 @@ class _EvolutionIslandGameState extends State<EvolutionIslandGame>
                 ),
               ),
               Positioned(
-                left: 70 + (_joyKnob.dx - _joyBase.dx) - 28,
-                top: 70 + (_joyKnob.dy - _joyBase.dy) - 28,
+                left: 70 + (knob.dx - base.dx) - 28,
+                top: 70 + (knob.dy - base.dy) - 28,
                 child: Container(
                   width: 56,
                   height: 56,

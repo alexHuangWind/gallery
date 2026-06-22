@@ -1,7 +1,3 @@
-// Copyright 2024 The Flutter team. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -15,24 +11,22 @@ import 'models.dart';
 /// camera that follows the player.
 class GamePainter extends CustomPainter {
   GamePainter({
-    this.playerPos,
-    this.playerStage,
-    this.playerHealthFraction,
-    this.playerFacingRight,
-    this.playerWobble,
-    this.invulnFlash,
-    this.islandRadius,
-    this.monsters,
-    this.projectiles,
-    this.particles,
-    this.floatingTexts,
-    this.decorations,
-    this.time,
+    required this.playerPos,
+    required this.playerStage,
+    required this.playerFacingRight,
+    required this.playerWobble,
+    required this.invulnFlash,
+    required this.islandRadius,
+    required this.monsters,
+    required this.projectiles,
+    required this.particles,
+    required this.floatingTexts,
+    required this.decorations,
+    required this.time,
   });
 
   final Offset playerPos;
   final EvolutionStage playerStage;
-  final double playerHealthFraction;
   final bool playerFacingRight;
   final double playerWobble;
   final double invulnFlash;
@@ -319,7 +313,7 @@ class GamePainter extends CustomPainter {
     canvas.restore();
   }
 
-  void _eyes(Canvas canvas, double r, double dx, double dy, double size) {
+  void _eyes(Canvas canvas, double dx, double dy, double size) {
     final Paint white = Paint()..color = Colors.white;
     final Paint black = Paint()..color = Colors.black87;
     canvas.drawCircle(Offset(dx, dy), size, white);
@@ -340,8 +334,8 @@ class GamePainter extends CustomPainter {
       r * 0.2,
       Paint()..color = Colors.white.withOpacity(0.5),
     );
-    _eyes(canvas, r, r * 0.25, -r * 0.1, r * 0.22);
-    _eyes(canvas, r, -r * 0.35, -r * 0.1, r * 0.22);
+    _eyes(canvas, r * 0.25, -r * 0.1, r * 0.22);
+    _eyes(canvas, -r * 0.35, -r * 0.1, r * 0.22);
   }
 
   void _lizard(Canvas canvas, double r, Paint body, Paint dark) {
@@ -367,7 +361,7 @@ class GamePainter extends CustomPainter {
         ..close();
       canvas.drawPath(s, dark);
     }
-    _eyes(canvas, r, r * 0.95, -r * 0.25, r * 0.18);
+    _eyes(canvas, r * 0.95, -r * 0.25, r * 0.18);
   }
 
   void _wolf(Canvas canvas, double r, Paint body, Paint dark) {
@@ -397,7 +391,7 @@ class GamePainter extends CustomPainter {
     }
     // Snout.
     canvas.drawCircle(Offset(r * 1.25, -r * 0.1), r * 0.18, dark);
-    _eyes(canvas, r, r * 1.0, -r * 0.35, r * 0.16);
+    _eyes(canvas, r * 1.0, -r * 0.35, r * 0.16);
   }
 
   void _golem(Canvas canvas, double r, Paint body, Paint dark) {
@@ -421,8 +415,8 @@ class GamePainter extends CustomPainter {
       crack,
     );
     canvas.drawLine(Offset(r * 0.1, r * 0.2), Offset(r * 0.6, r * 0.1), crack);
-    _eyes(canvas, r, r * 0.25, -r * 0.2, r * 0.16);
-    _eyes(canvas, r, -r * 0.25, -r * 0.2, r * 0.16);
+    _eyes(canvas, r * 0.25, -r * 0.2, r * 0.16);
+    _eyes(canvas, -r * 0.25, -r * 0.2, r * 0.16);
   }
 
   void _wing(Canvas canvas, double r, double dir, Paint paint, double flap) {
@@ -452,7 +446,7 @@ class GamePainter extends CustomPainter {
       ..lineTo(r * 1.05, -r * 0.6)
       ..close();
     canvas.drawPath(horn, dark);
-    _eyes(canvas, r, r * 1.05, -r * 0.4, r * 0.16);
+    _eyes(canvas, r * 1.05, -r * 0.4, r * 0.16);
   }
 
   void _dragon(Canvas canvas, double r, Paint body, Paint dark, double flap) {
@@ -490,7 +484,7 @@ class GamePainter extends CustomPainter {
       ),
       Paint()..color = dark.color.withOpacity(0.4),
     );
-    _eyes(canvas, r, r * 1.15, -r * 0.45, r * 0.18);
+    _eyes(canvas, r * 1.15, -r * 0.45, r * 0.18);
   }
 
   void _beetle(Canvas canvas, double r, Paint body, Paint dark) {
@@ -513,7 +507,7 @@ class GamePainter extends CustomPainter {
         ..color = dark.color
         ..strokeWidth = 2,
     );
-    _eyes(canvas, r, r * 0.7, -r * 0.2, r * 0.14);
+    _eyes(canvas, r * 0.7, -r * 0.2, r * 0.14);
   }
 
   void _bat(Canvas canvas, double r, Paint body, Paint dark, double flap) {
@@ -530,8 +524,8 @@ class GamePainter extends CustomPainter {
         ..close();
       canvas.drawPath(ear, body);
     }
-    _eyes(canvas, r, r * 0.25, -r * 0.05, r * 0.14);
-    _eyes(canvas, r, -r * 0.25, -r * 0.05, r * 0.14);
+    _eyes(canvas, r * 0.25, -r * 0.05, r * 0.14);
+    _eyes(canvas, -r * 0.25, -r * 0.05, r * 0.14);
   }
 
   void _boar(Canvas canvas, double r, Paint body, Paint dark) {
@@ -551,7 +545,7 @@ class GamePainter extends CustomPainter {
         ..close();
       canvas.drawPath(t, Paint()..color = Colors.white);
     }
-    _eyes(canvas, r, r * 0.95, -r * 0.3, r * 0.14);
+    _eyes(canvas, r * 0.95, -r * 0.3, r * 0.14);
   }
 
   void _toad(Canvas canvas, double r, Paint body, Paint dark) {
@@ -566,8 +560,8 @@ class GamePainter extends CustomPainter {
     // Bulging eyes.
     canvas.drawCircle(Offset(-r * 0.5, -r * 0.7), r * 0.32, body);
     canvas.drawCircle(Offset(r * 0.5, -r * 0.7), r * 0.32, body);
-    _eyes(canvas, r, -r * 0.5, -r * 0.7, r * 0.22);
-    _eyes(canvas, r, r * 0.5, -r * 0.7, r * 0.22);
+    _eyes(canvas, -r * 0.5, -r * 0.7, r * 0.22);
+    _eyes(canvas, r * 0.5, -r * 0.7, r * 0.22);
   }
 
   void _flame(Canvas canvas, double r, Paint body, Paint dark, double t) {
@@ -586,8 +580,8 @@ class GamePainter extends CustomPainter {
       r * 0.4,
       Paint()..color = const Color(0xFFFFEB3B),
     );
-    _eyes(canvas, r, r * 0.2, -r * 0.1, r * 0.12);
-    _eyes(canvas, r, -r * 0.2, -r * 0.1, r * 0.12);
+    _eyes(canvas, r * 0.2, -r * 0.1, r * 0.12);
+    _eyes(canvas, -r * 0.2, -r * 0.1, r * 0.12);
   }
 
   @override

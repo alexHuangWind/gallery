@@ -1,0 +1,7 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # The game draws everything with mutable Paint cascades, so const-only
+    # lints would create noise without improving the code.
+    prefer_const_constructors: false

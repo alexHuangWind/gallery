@@ -1,7 +1,3 @@
-// Copyright 2024 The Flutter team. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -25,19 +21,19 @@ enum CreatureForm {
 /// player into this stage, fully heals it and grants the listed combat stats.
 class EvolutionStage {
   const EvolutionStage({
-    this.name,
-    this.minLevel,
-    this.maxHp,
-    this.attack,
-    this.attackRange,
-    this.attackCooldown,
-    this.speed,
-    this.radius,
-    this.color,
-    this.accent,
-    this.form,
-    this.ranged,
-    this.description,
+    required this.name,
+    required this.minLevel,
+    required this.maxHp,
+    required this.attack,
+    required this.attackRange,
+    required this.attackCooldown,
+    required this.speed,
+    required this.radius,
+    required this.color,
+    required this.accent,
+    required this.form,
+    required this.ranged,
+    required this.description,
   });
 
   final String name;
@@ -164,21 +160,21 @@ EvolutionStage stageForLevel(int level) {
 /// these blueprints with their stats scaled by the player's level.
 class MonsterType {
   const MonsterType({
-    this.name,
-    this.baseHp,
-    this.baseAttack,
-    this.speed,
-    this.radius,
-    this.color,
-    this.accent,
-    this.form,
-    this.expReward,
-    this.aggroRange,
-    this.attackCooldown,
-    this.contactRange,
-    this.minPlayerLevel,
-    this.weight,
-    this.ranged,
+    required this.name,
+    required this.baseHp,
+    required this.baseAttack,
+    required this.speed,
+    required this.radius,
+    required this.color,
+    required this.accent,
+    required this.form,
+    required this.expReward,
+    required this.aggroRange,
+    required this.attackCooldown,
+    required this.contactRange,
+    required this.minPlayerLevel,
+    required this.weight,
+    required this.ranged,
   });
 
   final String name;
@@ -307,7 +303,7 @@ const List<MonsterType> kMonsterTypes = <MonsterType>[
   ),
 ];
 
-/// Shared 2D vector helpers built on [Offset].
+/// Shared 2D vector helper built on [Offset].
 Offset normalize(Offset v) {
   final double d = v.distance;
   if (d == 0) {
@@ -319,12 +315,12 @@ Offset normalize(Offset v) {
 /// A live monster instance fighting on the island.
 class Monster {
   Monster({
-    this.type,
-    this.position,
-    this.hp,
-    this.maxHp,
-    this.attack,
-    this.expReward,
+    required this.type,
+    required this.position,
+    required this.hp,
+    required this.maxHp,
+    required this.attack,
+    required this.expReward,
   });
 
   final MonsterType type;
@@ -351,13 +347,13 @@ class Monster {
 /// A damaging shot fired by the player (or a ranged monster).
 class Projectile {
   Projectile({
-    this.position,
-    this.velocity,
-    this.damage,
-    this.radius,
-    this.color,
-    this.fromPlayer,
-    this.life,
+    required this.position,
+    required this.velocity,
+    required this.damage,
+    required this.radius,
+    required this.color,
+    required this.fromPlayer,
+    required this.life,
   });
 
   Offset position;
@@ -373,7 +369,12 @@ class Projectile {
 
 /// Short-lived rising combat text (damage numbers, level-up, etc.).
 class FloatingText {
-  FloatingText({this.position, this.text, this.color, this.size});
+  FloatingText({
+    required this.position,
+    required this.text,
+    required this.color,
+    required this.size,
+  });
 
   Offset position;
   String text;
@@ -385,12 +386,12 @@ class FloatingText {
 /// A small decorative spark used for hit and death bursts.
 class Particle {
   Particle({
-    this.position,
-    this.velocity,
-    this.color,
-    this.life,
-    this.maxLife,
-    this.radius,
+    required this.position,
+    required this.velocity,
+    required this.color,
+    required this.life,
+    required this.maxLife,
+    required this.radius,
   });
 
   Offset position;
@@ -403,7 +404,12 @@ class Particle {
 
 /// Static island scenery (rocks, bushes) generated once per game.
 class Scenery {
-  Scenery({this.position, this.radius, this.isRock, this.seed});
+  Scenery({
+    required this.position,
+    required this.radius,
+    required this.isRock,
+    required this.seed,
+  });
 
   Offset position;
   double radius;
