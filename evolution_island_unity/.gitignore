@@ -1,0 +1,22 @@
+# Unity-generated folders (regenerated on first open)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+
+# Build artifacts
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# IDE
+.vs/
+.idea/
+*.csproj
+*.sln
+*.user
