@@ -1,0 +1,85 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
+import '../models/entry.dart';
+
+/// Hive-backed local store for [Entry] records. CRUD only — no cloud, no auth.
+///
+/// Notifies listeners on every mutation so the timeline rebuilds.
+class EntryStore extends ChangeNotifier {
+  EntryStore._(this._box);
+
+  static const String _boxName = 'entries';
+
+  final Box<Entry> _box;
+
+  /// Opens Hive and the entries box. Call once during app startup.
+  static Future<EntryStore> open() async {
+    await Hive.initFlutter();
+    if (!Hive.isAdapterRegistered(1)) {
+      Hive.registerAdapter(EntryAdapter());
+    }
+    final box = await Hive.openBox<Entry>(_boxName);
+    return EntryStore._(box);
+  }
+
+  /// All entries, newest first.
+  List<Entry> get entries {
+    final all = _box.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return all;
+  }
+
+  bool get isEmpty => _box.isEmpty;
+
+  Entry? byId(String id) => _box.get(id);
+
+  Future<void> add(Entry entry) async {
+    await _box.put(entry.id, entry);
+    notifyListeners();
+  }
+
+  Future<void> delete(String id) async {
+    final entry = _box.get(id);
+    if (entry != null) {
+      // Best-effort cleanup of the on-disk photo; the record is the source of
+      // truth, so a failed file delete must not block removing the entry.
+      try {
+        final file = File(entry.localPath);
+        if (file.existsSync()) {
+          await file.delete();
+        }
+      } catch (_) {}
+    }
+    await _box.delete(id);
+    notifyListeners();
+  }
+
+  /// Copies a picked photo into app-private storage and returns the new path.
+  ///
+  /// We never reference the picker's temp/cache path directly — it can be
+  /// reclaimed by the OS — so the card always has a stable file to render.
+  static Future<String> persistPhoto(String sourcePath, String entryId) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final photosDir = Directory(p.join(dir.path, 'photos'));
+    if (!photosDir.existsSync()) {
+      photosDir.createSync(recursive: true);
+    }
+    final ext = p.extension(sourcePath).isNotEmpty ? p.extension(sourcePath) : '.jpg';
+    final dest = p.join(photosDir.path, '$entryId$ext');
+    await File(sourcePath).copy(dest);
+    return dest;
+  }
+
+  /// Writes exported PNG bytes (the rendered card) to a temp file for sharing.
+  static Future<File> writeShareablePng(Uint8List bytes, String entryId) async {
+    final dir = await getTemporaryDirectory();
+    final file = File(p.join(dir.path, 'iprefer_$entryId.png'));
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+}
