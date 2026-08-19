@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/entry_store.dart';
+import '../data/location_service.dart';
 import '../models/entry.dart';
 import '../widgets/preference_card.dart';
 
@@ -16,12 +17,17 @@ import '../widgets/preference_card.dart';
 ///  - compose flow: pass [photo] + [text]; Save persists a new entry.
 ///  - archive view: pass an existing [entry]; Save is hidden, Share enabled.
 class CardScreen extends StatefulWidget {
-  const CardScreen({super.key, this.photo, this.text, this.entry})
+  const CardScreen({super.key, this.photo, this.text, this.fix, this.entry})
       : assert(entry != null || (photo != null && text != null),
             'provide either an existing entry or a photo+text to compose');
 
   final File? photo;
   final String? text;
+
+  /// Where this was recorded, when composing. Null is fine — the entry saves
+  /// without a place.
+  final PlaceFix? fix;
+
   final Entry? entry;
 
   @override
@@ -39,6 +45,8 @@ class _CardScreenState extends State<CardScreen> {
   DateTime get _createdAt => widget.entry?.createdAt ?? _composeDate;
   late final DateTime _composeDate = DateTime.now();
 
+  String? get _placeLabel => widget.entry?.placeLabel ?? widget.fix?.label;
+
   File get _imageFile =>
       widget.entry != null ? File(widget.entry!.localPath) : widget.photo!;
 
@@ -53,6 +61,9 @@ class _CardScreenState extends State<CardScreen> {
         localPath: storedPath,
         text: _text,
         createdAt: _composeDate,
+        latitude: widget.fix?.latitude,
+        longitude: widget.fix?.longitude,
+        placeLabel: widget.fix?.label,
       );
       await context.read<EntryStore>().add(entry);
       if (mounted) {
@@ -109,6 +120,7 @@ class _CardScreenState extends State<CardScreen> {
                     image: FileImage(_imageFile),
                     text: _text,
                     createdAt: _createdAt,
+                    placeLabel: _placeLabel,
                   ),
                 ),
               ),

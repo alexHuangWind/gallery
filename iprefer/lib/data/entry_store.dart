@@ -36,6 +36,33 @@ class EntryStore extends ChangeNotifier {
 
   bool get isEmpty => _box.isEmpty;
 
+  /// Entries that carry a location fix, newest first.
+  List<Entry> get located => entries.where((e) => e.hasLocation).toList();
+
+  /// Entries recorded within [radiusMetres] of a point, nearest first.
+  ///
+  /// This is what powers "you've been here before": stand where you once stood
+  /// and the thing you liked here comes back. The default radius is a block or
+  /// so — tight enough to mean *this* place, loose enough to survive the drift
+  /// of a consumer GPS.
+  List<Entry> near(
+    double latitude,
+    double longitude, {
+    double radiusMetres = 200,
+    String? excludeId,
+  }) {
+    final hits = <Entry>[];
+    for (final e in entries) {
+      if (e.id == excludeId) continue;
+      final d = e.metresTo(latitude, longitude);
+      if (d <= radiusMetres) hits.add(e);
+    }
+    hits.sort((a, b) => a
+        .metresTo(latitude, longitude)
+        .compareTo(b.metresTo(latitude, longitude)));
+    return hits;
+  }
+
   Entry? byId(String id) => _box.get(id);
 
   Future<void> add(Entry entry) async {

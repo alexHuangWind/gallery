@@ -1,4 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Map tiles are fetched over the network, so this is needed in release
+         too — not just in the debug manifest Flutter tooling adds. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Where you were when you liked it. Both are optional at runtime: the
+         app records fine when the user declines. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+
     <application
         android:label="I prefer"
         android:name="${applicationName}"

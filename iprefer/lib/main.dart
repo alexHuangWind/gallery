@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'data/entry_store.dart';
 import 'data/session.dart';
-import 'screens/archive_screen.dart';
+import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'theme.dart';
 
@@ -47,6 +47,6 @@ class _Root extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final signedIn = context.watch<Session>().signedIn;
-    return signedIn ? const ArchiveScreen() : const LoginScreen();
+    return signedIn ? const HomeShell() : const LoginScreen();
   }
 }

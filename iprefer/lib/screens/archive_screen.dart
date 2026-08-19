@@ -4,60 +4,53 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/entry_store.dart';
-import '../data/session.dart';
 import '../models/entry.dart';
 import '../theme.dart';
+import '../widgets/nearby_recall.dart';
 import '../widgets/preference_card.dart';
 import 'card_screen.dart';
 import 'compose_screen.dart';
 
-/// The timeline — a slow self-portrait of taste. Newest first. This is the
-/// app's home.
+/// The timeline — a slow self-portrait of taste. Newest first.
+///
+/// Rendered as the first tab of [HomeShell], which owns the app bar and FAB,
+/// so this is a bare body.
 class ArchiveScreen extends StatelessWidget {
   const ArchiveScreen({super.key});
 
-  void _compose(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const ComposeScreen()),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<EntryStore>();
-    final entries = store.entries;
+    final entries = context.watch<EntryStore>().entries;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('i prefer'),
-        actions: [
-          IconButton(
-            tooltip: 'sign out',
-            icon: const Icon(Icons.logout, size: 20),
-            onPressed: () => context.read<Session>().signOut(),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _compose(context),
-        backgroundColor: AppTheme.ink,
-        foregroundColor: AppTheme.paper,
-        icon: const Icon(Icons.add),
-        label: const Text('record'),
-      ),
-      body: entries.isEmpty
-          ? _EmptyState(onStart: () => _compose(context))
-          : GridView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: 9 / 16,
-              ),
-              itemCount: entries.length,
-              itemBuilder: (context, i) => _ArchiveTile(entry: entries[i]),
+    if (entries.isEmpty) {
+      return _EmptyState(
+        onStart: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const ComposeScreen()),
+        ),
+      );
+    }
+
+    return CustomScrollView(
+      slivers: [
+        // Surfaces only when the user is standing somewhere they've recorded
+        // before; otherwise it takes zero height.
+        const SliverToBoxAdapter(child: NearbyRecall()),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+          sliver: SliverGrid(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 14,
+              mainAxisSpacing: 14,
+              childAspectRatio: 9 / 16,
             ),
+            delegate: SliverChildBuilderDelegate(
+              (context, i) => _ArchiveTile(entry: entries[i]),
+              childCount: entries.length,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -99,6 +92,7 @@ class _ArchiveTile extends StatelessWidget {
         image: FileImage(File(entry.localPath)),
         text: entry.text,
         createdAt: entry.createdAt,
+        placeLabel: entry.placeLabel,
         compact: true,
       ),
     );

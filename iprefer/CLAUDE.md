@@ -19,11 +19,20 @@ A mobile app where someone photographs a thing they love and captions it
 1. Take / pick a photo + write one line `I prefer ...`
 2. **Generate the card** (the centerpiece — see Card spec)
 3. **Timeline** of past entries (a slow self-portrait of taste)
-4. **Share button** — present but secondary (system share of the rendered image)
-5. **Login is stubbed for now** — a placeholder "continue" that sets a local user id.
+4. **Place + time** — record when and (when available) where each entry happened
+5. **Map** of your entries — see where you liked what
+6. **Return-to-place recall** — arriving somewhere you've recorded before
+   resurfaces what you liked there
+7. **Share button** — present but secondary (system share of the rendered image)
+8. **Login is stubbed for now** — a placeholder "continue" that sets a local user id.
    Do NOT wire Firebase / Google sign-in yet; that needs the owner's console setup.
 
 Local storage only (Hive). No cloud sync, no Firestore, no auth backend in this pass.
+
+Items 4-6 were added after the first build. They serve the same bet as the rest of
+the MVP — **retention, not sharing**. Place is a memory hook: it gives the app a
+reason to be reopened that doesn't depend on an audience. Location is always
+optional; a declined permission must never block recording.
 
 ## Explicitly NOT in this build
 

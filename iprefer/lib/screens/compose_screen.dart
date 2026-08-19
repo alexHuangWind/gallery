@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../data/location_service.dart';
 import '../theme.dart';
 import 'card_screen.dart';
 
-/// Step one of the recording habit: a photo and a line.
+/// Step one of the recording habit: a photo, a line, and — quietly, in the
+/// background — where you are.
 class ComposeScreen extends StatefulWidget {
   const ComposeScreen({super.key});
 
@@ -14,10 +16,15 @@ class ComposeScreen extends StatefulWidget {
   State<ComposeScreen> createState() => _ComposeScreenState();
 }
 
+enum _FixState { idle, locating, found, unavailable, dropped }
+
 class _ComposeScreenState extends State<ComposeScreen> {
   final _picker = ImagePicker();
   final _controller = TextEditingController();
   File? _photo;
+
+  PlaceFix? _fix;
+  _FixState _fixState = _FixState.idle;
 
   @override
   void dispose() {
@@ -34,6 +41,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
       );
       if (picked != null) {
         setState(() => _photo = File(picked.path));
+        // Only now do we ask for location: the user has committed to recording
+        // something, so the permission prompt has an obvious reason attached.
+        _locate();
       }
     } catch (e) {
       if (mounted) {
@@ -44,12 +54,30 @@ class _ComposeScreenState extends State<ComposeScreen> {
     }
   }
 
+  Future<void> _locate() async {
+    if (_fixState == _FixState.locating) return;
+    setState(() => _fixState = _FixState.locating);
+    final fix = await LocationService.current(prompt: true);
+    if (!mounted) return;
+    setState(() {
+      _fix = fix;
+      _fixState = fix == null ? _FixState.unavailable : _FixState.found;
+    });
+  }
+
+  void _dropFix() {
+    setState(() {
+      _fix = null;
+      _fixState = _FixState.dropped;
+    });
+  }
+
   void _makeCard() {
     final text = _controller.text.trim();
     if (_photo == null || text.isEmpty) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => CardScreen(photo: _photo!, text: text),
+        builder: (_) => CardScreen(photo: _photo!, text: text, fix: _fix),
       ),
     );
   }
@@ -67,6 +95,15 @@ class _ComposeScreenState extends State<ComposeScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _PhotoWell(photo: _photo, onPick: _pick),
+              if (_photo != null) ...[
+                const SizedBox(height: 12),
+                _PlaceRow(
+                  state: _fixState,
+                  fix: _fix,
+                  onRetry: _locate,
+                  onDrop: _dropFix,
+                ),
+              ],
               const SizedBox(height: 24),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -106,6 +143,103 @@ class _ComposeScreenState extends State<ComposeScreen> {
         ),
       ),
     );
+  }
+}
+
+/// A quiet one-liner about where this is being recorded. Never a blocker —
+/// worst case it says the place is unknown and the entry saves anyway.
+class _PlaceRow extends StatelessWidget {
+  const _PlaceRow({
+    required this.state,
+    required this.fix,
+    required this.onRetry,
+    required this.onDrop,
+  });
+
+  final _FixState state;
+  final PlaceFix? fix;
+  final VoidCallback onRetry;
+  final VoidCallback onDrop;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = TextStyle(color: AppTheme.muted, fontSize: 13);
+
+    switch (state) {
+      case _FixState.locating:
+        return Row(
+          children: [
+            const SizedBox(
+              width: 13,
+              height: 13,
+              child: CircularProgressIndicator(strokeWidth: 1.6),
+            ),
+            const SizedBox(width: 10),
+            Text('finding where you are', style: muted),
+          ],
+        );
+
+      case _FixState.found:
+        final label = fix?.label ?? 'this spot';
+        return Row(
+          children: [
+            const Icon(Icons.place_outlined, size: 16, color: AppTheme.muted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(label, style: muted, overflow: TextOverflow.ellipsis),
+            ),
+            TextButton(
+              onPressed: onDrop,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('leave it off', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        );
+
+      case _FixState.dropped:
+        return Row(
+          children: [
+            const Icon(Icons.place_outlined, size: 16, color: AppTheme.muted),
+            const SizedBox(width: 6),
+            Text('no place on this one', style: muted),
+            const Spacer(),
+            TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('add it back', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        );
+
+      case _FixState.unavailable:
+        return Row(
+          children: [
+            const Icon(Icons.place_outlined, size: 16, color: AppTheme.muted),
+            const SizedBox(width: 6),
+            Expanded(child: Text("couldn't get your location", style: muted)),
+            TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('try again', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        );
+
+      case _FixState.idle:
+        return const SizedBox.shrink();
+    }
   }
 }
 

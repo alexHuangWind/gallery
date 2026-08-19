@@ -20,6 +20,7 @@ class PreferenceCard extends StatefulWidget {
     required this.image,
     required this.text,
     required this.createdAt,
+    this.placeLabel,
     this.boundaryKey,
     this.compact = false,
   });
@@ -29,6 +30,10 @@ class PreferenceCard extends StatefulWidget {
   /// The user's words (without the "I prefer" prefix).
   final String text;
   final DateTime createdAt;
+
+  /// Where this was recorded. Joins the date line when present; the card
+  /// gains no new type family for it.
+  final String? placeLabel;
 
   /// If set, the card is wrapped in a [RepaintBoundary] for PNG export.
   final GlobalKey? boundaryKey;
@@ -126,6 +131,7 @@ class _PreferenceCardState extends State<PreferenceCard> {
               child: _Lockup(
                 text: widget.text,
                 createdAt: widget.createdAt,
+                placeLabel: widget.placeLabel,
                 compact: widget.compact,
               ),
             ),
@@ -145,12 +151,21 @@ class _Lockup extends StatelessWidget {
   const _Lockup({
     required this.text,
     required this.createdAt,
+    required this.placeLabel,
     required this.compact,
   });
 
   final String text;
   final DateTime createdAt;
+  final String? placeLabel;
   final bool compact;
+
+  String _stamp() {
+    final date = DateFormat('MMM d, yyyy').format(createdAt).toLowerCase();
+    final place = placeLabel?.trim();
+    if (place == null || place.isEmpty) return date;
+    return '$date · $place';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -192,16 +207,22 @@ class _Lockup extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            // Date in a plain sans (system default) — the only non-serif type.
-            Text(
-              DateFormat('MMM d, yyyy').format(createdAt).toLowerCase(),
-              style: TextStyle(
-                fontSize: compact ? 9 : 11,
-                letterSpacing: 0.4,
-                color: Colors.white.withOpacity(0.7),
-                shadows: shadows,
+            // Date (and place, when we have one) in a plain sans — the only
+            // non-serif type on the card. Kept to a single quiet line.
+            Flexible(
+              child: Text(
+                _stamp(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: compact ? 9 : 11,
+                  letterSpacing: 0.4,
+                  color: Colors.white.withOpacity(0.7),
+                  shadows: shadows,
+                ),
               ),
             ),
+            const SizedBox(width: 8),
             // Tiny low-opacity wordmark.
             Text(
               'iprefer',

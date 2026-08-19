@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 0.1.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -19,6 +19,15 @@ dependencies:
 
   # Compose
   image_picker: ^1.1.2
+
+  # Place + time: where you were when you liked it
+  geolocator: ^13.0.1
+  geocoding: ^3.0.0
+
+  # Map of your preferences. OpenStreetMap tiles — no API key on either
+  # platform. Swap the tile URL for a paid source before shipping at volume.
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
 
   # Card rendering / color extraction
   palette_generator: ^0.3.3+5
