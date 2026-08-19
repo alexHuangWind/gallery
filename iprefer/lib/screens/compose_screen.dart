@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../data/location_service.dart';
 import '../theme.dart';
+import '../widgets/tag_input.dart';
 import 'card_screen.dart';
 
 /// Step one of the recording habit: a photo, a line, and — quietly, in the
@@ -25,6 +26,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
   PlaceFix? _fix;
   _FixState _fixState = _FixState.idle;
+  List<String> _tags = const [];
 
   @override
   void dispose() {
@@ -77,7 +79,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
     if (_photo == null || text.isEmpty) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => CardScreen(photo: _photo!, text: text, fix: _fix),
+        builder: (_) =>
+            CardScreen(photo: _photo!, text: text, fix: _fix, tags: _tags),
       ),
     );
   }
@@ -132,6 +135,11 @@ class _ComposeScreenState extends State<ComposeScreen> {
                   hintText: 'ferns that uncurl like a slow question',
                   border: OutlineInputBorder(),
                 ),
+              ),
+              const SizedBox(height: 22),
+              TagInput(
+                tags: _tags,
+                onChanged: (t) => setState(() => _tags = t),
               ),
               const SizedBox(height: 28),
               FilledButton(

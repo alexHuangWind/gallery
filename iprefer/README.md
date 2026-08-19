@@ -71,6 +71,11 @@ We only ever request **when-in-use** location. There is no background tracking.
 - **Card screen** — primary **Save** (writes the entry) + secondary **Share**
   (system share of the exported PNG).
 - **Timeline** — a grid of saved entries, newest first. Long-press to remove.
+- **Tags** — label an entry while composing ("grocery", "wine", "dish").
+  Suggestions come from tags you've already used, most-used first, so the
+  vocabulary is yours; the three seed tags only appear until you have your own.
+  One filter narrows the timeline *and* the map, so "wine" + the map tab answers
+  "where do I like wine?".
 - **Place + time** — each entry records the moment and, when available, the
   coordinates and a reverse-geocoded place name. The place joins the date on the
   card's existing sans line (`mar 3, 2026 · fitzroy`) — no new type family.
@@ -99,12 +104,15 @@ looks right regardless of device fonts. The date uses the system sans.
 lib/
   main.dart                     # startup: open Hive + session, route login/timeline
   theme.dart
-  models/entry.dart             # Entry (+ location) + hand-written Hive adapter
-  data/entry_store.dart         # Hive CRUD, proximity query, photo/PNG helpers
+  models/entry.dart             # Entry (+ location, tags) + hand-written Hive adapter
+  data/entry_store.dart         # Hive CRUD, proximity + tag queries, file helpers
   data/location_service.dart    # permission, current/passive fix, reverse geocode
+  data/tag_filter.dart          # tag selection shared by timeline and map
   data/session.dart             # stubbed local "login"
   widgets/preference_card.dart  # the RepaintBoundary card + palette scrim + capturePng
   widgets/nearby_recall.dart    # "you've been here before" banner
+  widgets/tag_input.dart        # compose-time tag editor
+  widgets/tag_filter_bar.dart   # tag filter chips
   screens/login_screen.dart
   screens/home_shell.dart       # two tabs: timeline + map
   screens/compose_screen.dart
@@ -112,6 +120,23 @@ lib/
   screens/archive_screen.dart   # the timeline
   screens/map_screen.dart       # the map
 ```
+
+## How tags behave
+
+- **Normalized on the way in** (`normalizeTags` in `models/entry.dart`):
+  lowercased, whitespace collapsed, a leading `#` dropped, deduped, capped at 24
+  characters. "Wine" and " wine " can never split one shelf into two.
+- **Filtering is AND, not OR** — the archive is small and personal, so stacking
+  "wine" and "dish" should narrow toward one memory rather than pile up two
+  unrelated shelves.
+- **Tags are not drawn on the card.** They're an organizing tool, not part of
+  the artifact; the card spec allows one serif and one sans and no extra
+  furniture, so tags appear *under* the card on its screen and never in the
+  exported PNG.
+- The filter is a shared `TagFilter`, and `TagFilter.effective()` intersects the
+  selection with the tags that still exist. Without that, deleting your last
+  "wine" entry would strand the archive on a filter matching nothing, with the
+  chip that set it no longer on screen to unset it.
 
 ## How location behaves
 

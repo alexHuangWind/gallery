@@ -30,6 +30,7 @@ void main() {
       latitude: -37.7983,
       longitude: 144.9784,
       placeLabel: 'fitzroy',
+      tags: const ['wine', 'dish'],
     );
 
     await box.put(original.id, original);
@@ -45,6 +46,7 @@ void main() {
     expect(restored.longitude, closeTo(144.9784, 1e-9));
     expect(restored.placeLabel, 'fitzroy');
     expect(restored.hasLocation, isTrue);
+    expect(restored.tags, ['wine', 'dish']);
   });
 
   test('an entry with no location round-trips as unlocated', () async {
@@ -65,6 +67,8 @@ void main() {
     expect(restored.hasLocation, isFalse);
     expect(restored.latitude, isNull);
     expect(restored.placeLabel, isNull);
+    // Entries written before tags existed must read back as untagged, not fail.
+    expect(restored.tags, isEmpty);
     // An unlocated entry must never satisfy a proximity test.
     expect(restored.metresTo(-37.7983, 144.9784), double.infinity);
   });

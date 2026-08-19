@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import '../data/entry_store.dart';
 import '../data/location_service.dart';
 import '../models/entry.dart';
+import '../theme.dart';
 import '../widgets/preference_card.dart';
 
 /// Shows the rendered card. Primary action **Save** (records the entry),
@@ -17,8 +18,14 @@ import '../widgets/preference_card.dart';
 ///  - compose flow: pass [photo] + [text]; Save persists a new entry.
 ///  - archive view: pass an existing [entry]; Save is hidden, Share enabled.
 class CardScreen extends StatefulWidget {
-  const CardScreen({super.key, this.photo, this.text, this.fix, this.entry})
-      : assert(entry != null || (photo != null && text != null),
+  const CardScreen({
+    super.key,
+    this.photo,
+    this.text,
+    this.fix,
+    this.tags = const [],
+    this.entry,
+  }) : assert(entry != null || (photo != null && text != null),
             'provide either an existing entry or a photo+text to compose');
 
   final File? photo;
@@ -27,6 +34,9 @@ class CardScreen extends StatefulWidget {
   /// Where this was recorded, when composing. Null is fine — the entry saves
   /// without a place.
   final PlaceFix? fix;
+
+  /// Tags chosen while composing. Ignored when [entry] is supplied.
+  final List<String> tags;
 
   final Entry? entry;
 
@@ -47,6 +57,8 @@ class _CardScreenState extends State<CardScreen> {
 
   String? get _placeLabel => widget.entry?.placeLabel ?? widget.fix?.label;
 
+  List<String> get _tags => widget.entry?.tags ?? widget.tags;
+
   File get _imageFile =>
       widget.entry != null ? File(widget.entry!.localPath) : widget.photo!;
 
@@ -64,6 +76,7 @@ class _CardScreenState extends State<CardScreen> {
         latitude: widget.fix?.latitude,
         longitude: widget.fix?.longitude,
         placeLabel: widget.fix?.label,
+        tags: normalizeTags(widget.tags),
       );
       await context.read<EntryStore>().add(entry);
       if (mounted) {
@@ -125,8 +138,35 @@ class _CardScreenState extends State<CardScreen> {
                 ),
               ),
             ),
+            if (_tags.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (final tag in _tags)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: AppTheme.muted.withOpacity(0.35),
+                          ),
+                        ),
+                        child: Text(
+                          tag,
+                          style: const TextStyle(
+                              fontSize: 12, color: AppTheme.muted),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
               child: Row(
                 children: [
                   if (canSave) ...[

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'data/entry_store.dart';
 import 'data/session.dart';
+import 'data/tag_filter.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'theme.dart';
@@ -29,6 +30,8 @@ class IPreferApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<EntryStore>.value(value: store),
         ChangeNotifierProvider<Session>.value(value: session),
+        // Shared by the timeline and the map so one filter narrows both.
+        ChangeNotifierProvider<TagFilter>(create: (_) => TagFilter()),
       ],
       child: MaterialApp(
         title: 'I prefer',

@@ -39,6 +39,41 @@ class EntryStore extends ChangeNotifier {
   /// Entries that carry a location fix, newest first.
   List<Entry> get located => entries.where((e) => e.hasLocation).toList();
 
+  /// Every tag in use, most-used first, ties broken alphabetically.
+  ///
+  /// Drives the compose suggestions, so the shelves the user actually reaches
+  /// for float to the front instead of us guessing for them.
+  List<String> get tagsByUse {
+    final counts = tagCounts;
+    final names = counts.keys.toList()
+      ..sort((a, b) {
+        final byCount = counts[b]!.compareTo(counts[a]!);
+        return byCount != 0 ? byCount : a.compareTo(b);
+      });
+    return names;
+  }
+
+  /// How many entries carry each tag.
+  Map<String, int> get tagCounts {
+    final counts = <String, int>{};
+    for (final e in _box.values) {
+      for (final t in e.tags) {
+        counts[t] = (counts[t] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
+
+  /// Entries carrying every tag in [tags] (AND, not OR), newest first.
+  ///
+  /// AND is the right default here: the archive is small and personal, so
+  /// stacking "wine" and "dish" should narrow toward one memory rather than
+  /// pile up two unrelated shelves.
+  List<Entry> withTags(Set<String> tags) {
+    if (tags.isEmpty) return entries;
+    return entries.where((e) => tags.every(e.hasTag)).toList();
+  }
+
   /// Entries recorded within [radiusMetres] of a point, nearest first.
   ///
   /// This is what powers "you've been here before": stand where you once stood
@@ -50,9 +85,10 @@ class EntryStore extends ChangeNotifier {
     double longitude, {
     double radiusMetres = 200,
     String? excludeId,
+    Set<String> tags = const {},
   }) {
     final hits = <Entry>[];
-    for (final e in entries) {
+    for (final e in withTags(tags)) {
       if (e.id == excludeId) continue;
       final d = e.metresTo(latitude, longitude);
       if (d <= radiusMetres) hits.add(e);

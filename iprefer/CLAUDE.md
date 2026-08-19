@@ -23,21 +23,26 @@ A mobile app where someone photographs a thing they love and captions it
 5. **Map** of your entries — see where you liked what
 6. **Return-to-place recall** — arriving somewhere you've recorded before
    resurfaces what you liked there
-7. **Share button** — present but secondary (system share of the rendered image)
-8. **Login is stubbed for now** — a placeholder "continue" that sets a local user id.
+7. **Tags** — label an entry on the way in ("grocery", "wine", "dish"); one
+   filter narrows both the timeline and the map. Tags never render on the card.
+8. **Share button** — present but secondary (system share of the rendered image)
+9. **Login is stubbed for now** — a placeholder "continue" that sets a local user id.
    Do NOT wire Firebase / Google sign-in yet; that needs the owner's console setup.
 
 Local storage only (Hive). No cloud sync, no Firestore, no auth backend in this pass.
 
-Items 4-6 were added after the first build. They serve the same bet as the rest of
+Items 4-7 were added after the first build. They serve the same bet as the rest of
 the MVP — **retention, not sharing**. Place is a memory hook: it gives the app a
 reason to be reopened that doesn't depend on an audience. Location is always
 optional; a declined permission must never block recording.
 
 ## Explicitly NOT in this build
 
-AI features (that's v2) · likes / public feed / follow · tags · edit history ·
+AI features (that's v2) · likes / public feed / follow · edit history ·
 multi-language · multiple card templates · password/account management.
+
+(Tags were originally excluded here and have since been added at the owner's
+request — see scope item 9. They stay off the card itself.)
 
 ## Card spec (the real leverage — get this right)
 

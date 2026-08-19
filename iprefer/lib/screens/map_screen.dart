@@ -7,8 +7,10 @@ import 'package:provider/provider.dart';
 
 import '../data/entry_store.dart';
 import '../data/location_service.dart';
+import '../data/tag_filter.dart';
 import '../models/entry.dart';
 import '../theme.dart';
+import '../widgets/tag_filter_bar.dart';
 import 'card_screen.dart';
 
 /// Where you liked what. Every located entry is a dot on the map; tapping one
@@ -39,79 +41,99 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final located = context.watch<EntryStore>().located;
+    final store = context.watch<EntryStore>();
+    final active = context.watch<TagFilter>().effective(store.tagsByUse);
+    final located =
+        store.withTags(active).where((e) => e.hasLocation).toList();
 
-    if (located.isEmpty) return const _MapEmptyState();
+    if (located.isEmpty) {
+      return Column(
+        children: [
+          const TagFilterBar(),
+          Expanded(child: _MapEmptyState(filtered: active.isNotEmpty)),
+        ],
+      );
+    }
 
     final points = [
       for (final e in located) LatLng(e.latitude!, e.longitude!),
     ];
 
-    return Stack(
+    return Column(
       children: [
-        FlutterMap(
-          mapController: _controller,
-          options: MapOptions(
-            // A single point has degenerate bounds, so centre on it instead of
-            // asking the camera to fit a zero-area box.
-            initialCenter: points.length == 1 ? points.first : const LatLng(0, 0),
-            initialZoom: points.length == 1 ? 15 : 2,
-            initialCameraFit: points.length > 1
-                ? CameraFit.bounds(
-                    bounds: LatLngBounds.fromPoints(points),
-                    padding: const EdgeInsets.all(64),
-                    maxZoom: 16,
-                  )
-                : null,
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              // OSM's tile policy requires identifying the client. Swap this
-              // layer for a paid tile source before shipping at volume.
-              userAgentPackageName: 'com.iprefer.app',
-              maxZoom: 19,
-            ),
-            if (_me != null)
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: _me!,
-                    width: 18,
-                    height: 18,
-                    child: const _YouAreHereDot(),
+        const TagFilterBar(),
+        Expanded(
+          child: Stack(
+            children: [
+              FlutterMap(
+                mapController: _controller,
+                options: MapOptions(
+                  // A single point has degenerate bounds, so centre on it
+                  // instead of asking the camera to fit a zero-area box.
+                  initialCenter:
+                      points.length == 1 ? points.first : const LatLng(0, 0),
+                  initialZoom: points.length == 1 ? 15 : 2,
+                  initialCameraFit: points.length > 1
+                      ? CameraFit.bounds(
+                          bounds: LatLngBounds.fromPoints(points),
+                          padding: const EdgeInsets.all(64),
+                          maxZoom: 16,
+                        )
+                      : null,
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    // OSM's tile policy requires identifying the client. Swap
+                    // this layer for a paid tile source before shipping at
+                    // volume.
+                    userAgentPackageName: 'com.iprefer.app',
+                    maxZoom: 19,
+                  ),
+                  if (_me != null)
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: _me!,
+                          width: 18,
+                          height: 18,
+                          child: const _YouAreHereDot(),
+                        ),
+                      ],
+                    ),
+                  MarkerLayer(
+                    markers: [
+                      for (final e in located)
+                        Marker(
+                          point: LatLng(e.latitude!, e.longitude!),
+                          width: 54,
+                          height: 54,
+                          child: _EntryPin(entry: e),
+                        ),
+                    ],
                   ),
                 ],
               ),
-            MarkerLayer(
-              markers: [
-                for (final e in located)
-                  Marker(
-                    point: LatLng(e.latitude!, e.longitude!),
-                    width: 54,
-                    height: 54,
-                    child: _EntryPin(entry: e),
+              // OSM's licence requires visible attribution.
+              Positioned(
+                right: 6,
+                bottom: 6,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.75),
+                    borderRadius: BorderRadius.circular(3),
                   ),
-              ],
-            ),
-          ],
-        ),
-        // OSM's licence requires visible attribution.
-        Positioned(
-          right: 6,
-          bottom: 6,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.75),
-              borderRadius: BorderRadius.circular(3),
-            ),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              child: Text(
-                '© OpenStreetMap',
-                style: TextStyle(fontSize: 9, color: Colors.black87),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    child: Text(
+                      '© OpenStreetMap',
+                      style: TextStyle(fontSize: 9, color: Colors.black87),
+                    ),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ],
@@ -119,7 +141,6 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
-/// A photo pin — the map should show *what* you liked, not just that you did.
 class _EntryPin extends StatelessWidget {
   const _EntryPin({required this.entry});
 
@@ -173,7 +194,12 @@ class _YouAreHereDot extends StatelessWidget {
 }
 
 class _MapEmptyState extends StatelessWidget {
-  const _MapEmptyState();
+  const _MapEmptyState({this.filtered = false});
+
+  /// True when a tag filter is what emptied the map, rather than a genuinely
+  /// empty archive — the two need different copy or the user thinks their
+  /// entries vanished.
+  final bool filtered;
 
   @override
   Widget build(BuildContext context) {
@@ -184,7 +210,7 @@ class _MapEmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'no places yet',
+              filtered ? 'nothing under that, here' : 'no places yet',
               style: TextStyle(
                 fontFamily: AppTheme.serif,
                 fontStyle: FontStyle.italic,
@@ -193,10 +219,12 @@ class _MapEmptyState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            const Text(
-              'record something while you are out,\nand it will land here.',
+            Text(
+              filtered
+                  ? 'no tagged entries have a place yet.'
+                  : 'record something while you are out,\nand it will land here.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.muted, height: 1.5),
+              style: const TextStyle(color: AppTheme.muted, height: 1.5),
             ),
           ],
         ),

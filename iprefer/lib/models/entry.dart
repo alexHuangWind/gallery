@@ -20,7 +20,8 @@ class Entry {
     this.latitude,
     this.longitude,
     this.placeLabel,
-  });
+    List<String>? tags,
+  }) : tags = tags ?? const [];
 
   final String id;
 
@@ -40,9 +41,22 @@ class Entry {
   /// Null when reverse geocoding failed — the coordinates still stand.
   final String? placeLabel;
 
+  /// What kind of thing this is: "wine", "dish", "grocery".
+  ///
+  /// Always normalized (lowercase, trimmed, deduped) via [normalizeTags], so
+  /// "Wine" and " wine " can never split one shelf into two. Empty is normal.
+  final List<String> tags;
+
   bool get hasLocation => latitude != null && longitude != null;
 
-  Entry copyWith({double? latitude, double? longitude, String? placeLabel}) {
+  bool hasTag(String tag) => tags.contains(tag.trim().toLowerCase());
+
+  Entry copyWith({
+    double? latitude,
+    double? longitude,
+    String? placeLabel,
+    List<String>? tags,
+  }) {
     return Entry(
       id: id,
       localPath: localPath,
@@ -51,6 +65,7 @@ class Entry {
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       placeLabel: placeLabel ?? this.placeLabel,
+      tags: tags ?? this.tags,
     );
   }
 
@@ -62,6 +77,29 @@ class Entry {
     if (!hasLocation) return double.infinity;
     return haversineMetres(latitude!, longitude!, lat, lng);
   }
+}
+
+/// Cleans user-entered tags into the one form we store and compare.
+///
+/// Lowercase (the app's voice is lowercase anyway), whitespace collapsed, a
+/// leading `#` dropped, deduped, and capped in length so a stray paste can't
+/// produce a tag that breaks every layout it lands in. Order is preserved.
+List<String> normalizeTags(Iterable<String> raw) {
+  const maxLength = 24;
+  final seen = <String>{};
+  final out = <String>[];
+  for (final candidate in raw) {
+    var value = candidate.trim().toLowerCase();
+    while (value.startsWith('#')) {
+      value = value.substring(1).trimLeft();
+    }
+    value = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (value.isEmpty) continue;
+    if (value.length > maxLength) value = value.substring(0, maxLength).trim();
+    if (value.isEmpty) continue;
+    if (seen.add(value)) out.add(value);
+  }
+  return out;
 }
 
 /// Great-circle distance in metres between two lat/lng pairs.
@@ -103,13 +141,17 @@ class EntryAdapter extends TypeAdapter<Entry> {
       latitude: fields[4] as double?,
       longitude: fields[5] as double?,
       placeLabel: fields[6] as String?,
+      // Absent for entries written before tags existed — an empty list, not an
+      // error. Hive hands back List<dynamic>, so copy into a typed list rather
+      // than casting lazily.
+      tags: fields[7] == null ? const [] : List<String>.from(fields[7] as List),
     );
   }
 
   @override
   void write(BinaryWriter writer, Entry obj) {
     writer
-      ..writeByte(7)
+      ..writeByte(8)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -123,7 +165,9 @@ class EntryAdapter extends TypeAdapter<Entry> {
       ..writeByte(5)
       ..write(obj.longitude)
       ..writeByte(6)
-      ..write(obj.placeLabel);
+      ..write(obj.placeLabel)
+      ..writeByte(7)
+      ..write(obj.tags);
   }
 
   @override

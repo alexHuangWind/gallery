@@ -20,9 +20,17 @@ import '../theme.dart';
 /// Deliberately passive about permission — it never prompts on launch. If we
 /// don't already have the right, we simply show nothing.
 class NearbyRecall extends StatefulWidget {
-  const NearbyRecall({super.key, this.radiusMetres = 200});
+  const NearbyRecall({
+    super.key,
+    this.radiusMetres = 200,
+    this.tags = const {},
+  });
 
   final double radiusMetres;
+
+  /// Narrows recall to the active tag filter, so "wine" + standing here asks
+  /// "what wine did I like here?".
+  final Set<String> tags;
 
   @override
   State<NearbyRecall> createState() => _NearbyRecallState();
@@ -53,7 +61,8 @@ class _NearbyRecallState extends State<NearbyRecall> {
 
     final nearby = context
         .watch<EntryStore>()
-        .near(here.latitude, here.longitude, radiusMetres: widget.radiusMetres);
+        .near(here.latitude, here.longitude,
+            radiusMetres: widget.radiusMetres, tags: widget.tags);
     if (nearby.isEmpty) return const SizedBox.shrink();
 
     final place = here.label;
