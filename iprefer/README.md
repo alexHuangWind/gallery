@@ -74,8 +74,10 @@ We only ever request **when-in-use** location. There is no background tracking.
 - **Tags** — label an entry while composing ("grocery", "wine", "dish").
   Suggestions come from tags you've already used, most-used first, so the
   vocabulary is yours; the three seed tags only appear until you have your own.
-  One filter narrows the timeline *and* the map, so "wine" + the map tab answers
+  One filter drives the timeline *and* the map, so "wine" + the map tab answers
   "where do I like wine?".
+- **Sort** — the timeline reads newest-first by default, or **nearest-first**,
+  which orders your entries by how far they are from where you're standing.
 - **Place + time** — each entry records the moment and, when available, the
   coordinates and a reverse-geocoded place name. The place joins the date on the
   card's existing sans line (`mar 3, 2026 · fitzroy`) — no new type family.
@@ -107,12 +109,13 @@ lib/
   models/entry.dart             # Entry (+ location, tags) + hand-written Hive adapter
   data/entry_store.dart         # Hive CRUD, proximity + tag queries, file helpers
   data/location_service.dart    # permission, current/passive fix, reverse geocode
-  data/tag_filter.dart          # tag selection shared by timeline and map
+  data/archive_view.dart        # tag selection + sort, shared by timeline and map
   data/session.dart             # stubbed local "login"
   widgets/preference_card.dart  # the RepaintBoundary card + palette scrim + capturePng
   widgets/nearby_recall.dart    # "you've been here before" banner
   widgets/tag_input.dart        # compose-time tag editor
   widgets/tag_filter_bar.dart   # tag filter chips
+  widgets/sort_bar.dart         # newest / nearest toggle
   screens/login_screen.dart
   screens/home_shell.dart       # two tabs: timeline + map
   screens/compose_screen.dart
@@ -126,17 +129,36 @@ lib/
 - **Normalized on the way in** (`normalizeTags` in `models/entry.dart`):
   lowercased, whitespace collapsed, a leading `#` dropped, deduped, capped at 24
   characters. "Wine" and " wine " can never split one shelf into two.
-- **Filtering is AND, not OR** — the archive is small and personal, so stacking
-  "wine" and "dish" should narrow toward one memory rather than pile up two
-  unrelated shelves.
+- **Filtering is OR** — selecting more tags shows *more*, not less. Several
+  chips can be lit at once; "wine" plus "grocery" returns everything under
+  either shelf, and "all" clears the selection.
+- Because the selection only ever holds tags that still exist, an OR filter can
+  never come back empty while you have entries — so the timeline has no "your
+  filter matched nothing" state to fall into.
 - **Tags are not drawn on the card.** They're an organizing tool, not part of
   the artifact; the card spec allows one serif and one sans and no extra
   furniture, so tags appear *under* the card on its screen and never in the
   exported PNG.
-- The filter is a shared `TagFilter`, and `TagFilter.effective()` intersects the
-  selection with the tags that still exist. Without that, deleting your last
-  "wine" entry would strand the archive on a filter matching nothing, with the
-  chip that set it no longer on screen to unset it.
+- Filter and sort live together in a shared `ArchiveView`, and
+  `ArchiveView.effective()` intersects the selection with the tags that still
+  exist. Without that, deleting your last "wine" entry would leave the archive
+  referring to a tag whose chip is no longer on screen to unset.
+
+## How sorting behaves
+
+- **newest** (default) — straight recency, and the order the store already
+  returns, so it costs nothing.
+- **nearest** — orders by great-circle distance from where you are standing.
+  Entries with no location fix sort last, held in newest-first order by an
+  explicit tiebreak (Dart's `List.sort` is not stable, so without it they would
+  shuffle on every rebuild).
+- Tapping "nearest" is the one place on the timeline that may raise a location
+  prompt, and that is deliberate: the user just asked for a distance ordering,
+  so the dialog has an obvious reason. If no fix can be had, the mode stays
+  selected and says "needs your location · try again" rather than snapping back
+  to newest, which would read as a broken control. The list falls back to
+  newest-first meanwhile — a missing fix degrades the ordering, it never empties
+  the archive.
 
 ## How location behaves
 

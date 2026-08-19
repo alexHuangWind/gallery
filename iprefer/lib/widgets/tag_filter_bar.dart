@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/entry_store.dart';
-import '../data/tag_filter.dart';
+import '../data/archive_view.dart';
 import '../theme.dart';
 
-/// Horizontal strip of tag chips that narrows both the timeline and the map.
+/// Horizontal strip of tag chips that filters both the timeline and the map.
+///
+/// Selecting more tags shows *more*, not less (OR), so several chips can be lit
+/// at once and "all" clears them.
 ///
 /// Takes no height at all when the user has never tagged anything, so an
 /// untagged archive looks exactly as it did before this feature existed.
@@ -15,12 +18,12 @@ class TagFilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final counts = context.watch<EntryStore>().tagCounts;
-    final filter = context.watch<TagFilter>();
+    final view = context.watch<ArchiveView>();
 
     if (counts.isEmpty) return const SizedBox.shrink();
 
     final tags = context.read<EntryStore>().tagsByUse;
-    final active = filter.effective(tags);
+    final active = view.effective(tags);
 
     return SizedBox(
       height: 44,
@@ -32,7 +35,7 @@ class TagFilterBar extends StatelessWidget {
             _Chip(
               label: 'all',
               selected: false,
-              onTap: () => context.read<TagFilter>().clear(),
+              onTap: () => context.read<ArchiveView>().clear(),
             ),
             const SizedBox(width: 8),
           ],
@@ -40,7 +43,7 @@ class TagFilterBar extends StatelessWidget {
             _Chip(
               label: '$tag  ${counts[tag]}',
               selected: active.contains(tag),
-              onTap: () => context.read<TagFilter>().toggle(tag),
+              onTap: () => context.read<ArchiveView>().toggle(tag),
             ),
             const SizedBox(width: 8),
           ],

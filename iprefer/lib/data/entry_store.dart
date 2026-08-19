@@ -64,14 +64,14 @@ class EntryStore extends ChangeNotifier {
     return counts;
   }
 
-  /// Entries carrying every tag in [tags] (AND, not OR), newest first.
+  /// Entries carrying *any* of [tags] (OR, not AND), newest first.
   ///
-  /// AND is the right default here: the archive is small and personal, so
-  /// stacking "wine" and "dish" should narrow toward one memory rather than
-  /// pile up two unrelated shelves.
-  List<Entry> withTags(Set<String> tags) {
+  /// Selecting more tags widens the archive rather than narrowing it: picking
+  /// "wine" and "dish" shows everything under either shelf. An empty selection
+  /// means no filter at all, so everything comes back.
+  List<Entry> withAnyTag(Set<String> tags) {
     if (tags.isEmpty) return entries;
-    return entries.where((e) => tags.every(e.hasTag)).toList();
+    return entries.where((e) => tags.any(e.hasTag)).toList();
   }
 
   /// Entries recorded within [radiusMetres] of a point, nearest first.
@@ -88,7 +88,7 @@ class EntryStore extends ChangeNotifier {
     Set<String> tags = const {},
   }) {
     final hits = <Entry>[];
-    for (final e in withTags(tags)) {
+    for (final e in withAnyTag(tags)) {
       if (e.id == excludeId) continue;
       final d = e.metresTo(latitude, longitude);
       if (d <= radiusMetres) hits.add(e);

@@ -4,11 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/entry_store.dart';
-import '../data/tag_filter.dart';
+import '../data/archive_view.dart';
 import '../models/entry.dart';
 import '../theme.dart';
 import '../widgets/nearby_recall.dart';
 import '../widgets/preference_card.dart';
+import '../widgets/sort_bar.dart';
 import '../widgets/tag_filter_bar.dart';
 import 'card_screen.dart';
 import 'compose_screen.dart';
@@ -32,37 +33,37 @@ class ArchiveScreen extends StatelessWidget {
       );
     }
 
-    final active = context.watch<TagFilter>().effective(store.tagsByUse);
-    final entries = store.withTags(active);
+    final view = context.watch<ArchiveView>();
+    final active = view.effective(store.tagsByUse);
+
+    // Filtering is OR, and `active` only ever holds tags that still exist, so
+    // this list cannot come back empty while the store has entries — there is
+    // no "your filter matched nothing" state to handle here.
+    final entries = view.order(store.withAnyTag(active));
 
     return CustomScrollView(
       slivers: [
         // Zero height until the user has tagged something.
         const SliverToBoxAdapter(child: TagFilterBar()),
+        const SliverToBoxAdapter(child: SortBar()),
         // Surfaces only when the user is standing somewhere they've recorded
         // before; otherwise it takes zero height.
         SliverToBoxAdapter(child: NearbyRecall(tags: active)),
-        if (entries.isEmpty)
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: _NoMatches(onClear: () => context.read<TagFilter>().clear()),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: 9 / 16,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, i) => _ArchiveTile(entry: entries[i]),
-                childCount: entries.length,
-              ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+          sliver: SliverGrid(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 14,
+              mainAxisSpacing: 14,
+              childAspectRatio: 9 / 16,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, i) => _ArchiveTile(entry: entries[i]),
+              childCount: entries.length,
             ),
           ),
+        ),
       ],
     );
   }
@@ -107,36 +108,6 @@ class _ArchiveTile extends StatelessWidget {
         createdAt: entry.createdAt,
         placeLabel: entry.placeLabel,
         compact: true,
-      ),
-    );
-  }
-}
-
-/// Shown when a tag filter excludes everything — always with a way back out.
-class _NoMatches extends StatelessWidget {
-  const _NoMatches({required this.onClear});
-
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(40, 60, 40, 40),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'nothing under that',
-            style: TextStyle(
-              fontFamily: AppTheme.serif,
-              fontStyle: FontStyle.italic,
-              fontSize: 22,
-              color: AppTheme.ink,
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextButton(onPressed: onClear, child: const Text('show everything')),
-        ],
       ),
     );
   }

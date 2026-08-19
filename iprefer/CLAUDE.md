@@ -24,7 +24,9 @@ A mobile app where someone photographs a thing they love and captions it
 6. **Return-to-place recall** — arriving somewhere you've recorded before
    resurfaces what you liked there
 7. **Tags** — label an entry on the way in ("grocery", "wine", "dish"); one
-   filter narrows both the timeline and the map. Tags never render on the card.
+   filter drives both the timeline and the map. Filtering is OR: more tags show
+   more. The timeline sorts by newest or by nearest. Tags never render on the
+   card.
 8. **Share button** — present but secondary (system share of the rendered image)
 9. **Login is stubbed for now** — a placeholder "continue" that sets a local user id.
    Do NOT wire Firebase / Google sign-in yet; that needs the owner's console setup.

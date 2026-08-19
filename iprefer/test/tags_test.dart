@@ -59,9 +59,9 @@ void main() {
   });
 
   group('tag filtering semantics', () {
-    // Mirrors EntryStore.withTags: every selected tag must be present (AND).
-    List<Entry> withTags(List<Entry> all, Set<String> tags) =>
-        tags.isEmpty ? all : all.where((e) => tags.every(e.hasTag)).toList();
+    // Mirrors EntryStore.withAnyTag: any selected tag is enough (OR).
+    List<Entry> withAnyTag(List<Entry> all, Set<String> tags) =>
+        tags.isEmpty ? all : all.where((e) => tags.any(e.hasTag)).toList();
 
     final entries = [
       _tagged('a', const ['wine', 'dish']),
@@ -71,19 +71,25 @@ void main() {
     ];
 
     test('an empty filter keeps everything', () {
-      expect(withTags(entries, {}).length, 4);
+      expect(withAnyTag(entries, {}).length, 4);
     });
 
     test('one tag keeps every entry carrying it', () {
-      expect(withTags(entries, {'wine'}).map((e) => e.id), ['a', 'b']);
+      expect(withAnyTag(entries, {'wine'}).map((e) => e.id), ['a', 'b']);
     });
 
-    test('two tags narrow rather than widen', () {
-      expect(withTags(entries, {'wine', 'dish'}).map((e) => e.id), ['a']);
+    test('more tags widen the result rather than narrowing it', () {
+      expect(withAnyTag(entries, {'wine', 'grocery'}).map((e) => e.id),
+          ['a', 'b', 'c']);
     });
 
-    test('an unmatched combination yields nothing', () {
-      expect(withTags(entries, {'wine', 'grocery'}), isEmpty);
+    test('a tag already covered by another adds nothing new', () {
+      // 'dish' only appears on 'a', which 'wine' already matched.
+      expect(withAnyTag(entries, {'wine', 'dish'}).map((e) => e.id), ['a', 'b']);
+    });
+
+    test('untagged entries are excluded once any filter is on', () {
+      expect(withAnyTag(entries, {'wine'}).map((e) => e.id), isNot(contains('d')));
     });
   });
 }

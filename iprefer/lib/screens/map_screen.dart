@@ -7,7 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../data/entry_store.dart';
 import '../data/location_service.dart';
-import '../data/tag_filter.dart';
+import '../data/archive_view.dart';
 import '../models/entry.dart';
 import '../theme.dart';
 import '../widgets/tag_filter_bar.dart';
@@ -42,9 +42,9 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<EntryStore>();
-    final active = context.watch<TagFilter>().effective(store.tagsByUse);
+    final active = context.watch<ArchiveView>().effective(store.tagsByUse);
     final located =
-        store.withTags(active).where((e) => e.hasLocation).toList();
+        store.withAnyTag(active).where((e) => e.hasLocation).toList();
 
     if (located.isEmpty) {
       return Column(
