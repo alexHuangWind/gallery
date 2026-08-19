@@ -62,7 +62,7 @@ class _TagInputState extends State<TagInput> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        const Text(
           'what kind of thing is it?',
           style: TextStyle(color: AppTheme.muted, fontSize: 13),
         ),

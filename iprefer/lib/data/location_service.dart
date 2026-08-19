@@ -20,8 +20,7 @@ class PlaceFix {
 /// Wraps the platform location stack. Every method answers with a value or
 /// null — never an exception — because location is an enhancement here, not a
 /// requirement. A cold GPS or a declined prompt must not break recording.
-class LocationService {
-  const LocationService._();
+abstract final class LocationService {
 
   /// True when we already hold permission. Does not prompt.
   static Future<bool> hasPermission() async {

@@ -103,8 +103,9 @@ List<Entry> sortedByDistanceFrom(
 /// Cleans user-entered tags into the one form we store and compare.
 ///
 /// Lowercase (the app's voice is lowercase anyway), whitespace collapsed, a
-/// leading `#` dropped, deduped, and capped in length so a stray paste can't
-/// produce a tag that breaks every layout it lands in. Order is preserved.
+/// leading `#` dropped, deduped, and capped at 24 *characters* so a stray paste
+/// can't produce a tag that breaks every layout it lands in. Order is
+/// preserved.
 List<String> normalizeTags(Iterable<String> raw) {
   const maxLength = 24;
   final seen = <String>{};
@@ -116,14 +117,14 @@ List<String> normalizeTags(Iterable<String> raw) {
     }
     value = value.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (value.isEmpty) continue;
-    if (value.length > maxLength) {
-      // length/substring count UTF-16 code units, so a naive cut can land
-      // between the halves of an emoji and leave a lone surrogate — which two
-      // different emoji would both truncate to, silently merging two shelves.
-      var cut = maxLength;
-      final unit = value.codeUnitAt(cut - 1);
-      if (unit >= 0xD800 && unit <= 0xDBFF) cut -= 1;
-      value = value.substring(0, cut).trim();
+    // Cap by runes, not by `length`/`substring`, which count UTF-16 code
+    // units: an emoji costs two, so a code-unit cut can land between the
+    // halves of a surrogate pair. Dropping the split pair is not enough
+    // either — "…🍷" and "…🍺" then both truncate to the same prefix and
+    // silently become one shelf. Counting characters keeps them distinct.
+    final runes = value.runes;
+    if (runes.length > maxLength) {
+      value = String.fromCharCodes(runes.take(maxLength)).trim();
     }
     if (value.isEmpty) continue;
     if (seen.add(value)) out.add(value);

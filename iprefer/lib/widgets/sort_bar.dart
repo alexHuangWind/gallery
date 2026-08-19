@@ -21,7 +21,7 @@ class SortBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: Row(
         children: [
-          Text(
+          const Text(
             'sorted by',
             style: TextStyle(color: AppTheme.muted, fontSize: 12),
           ),
@@ -55,7 +55,7 @@ class _NearestStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = TextStyle(color: AppTheme.muted, fontSize: 11);
+    const style = TextStyle(color: AppTheme.muted, fontSize: 11);
 
     if (view.locating) {
       return Row(

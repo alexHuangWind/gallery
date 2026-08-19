@@ -188,7 +188,7 @@ class _PlaceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = TextStyle(color: AppTheme.muted, fontSize: 13);
+    const muted = TextStyle(color: AppTheme.muted, fontSize: 13);
 
     switch (state) {
       case _FixState.locating:

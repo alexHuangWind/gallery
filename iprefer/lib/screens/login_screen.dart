@@ -24,7 +24,7 @@ class LoginScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'I prefer',
                 style: TextStyle(
                   fontFamily: AppTheme.serif,

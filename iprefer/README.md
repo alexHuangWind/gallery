@@ -188,6 +188,12 @@ The recall radius is 200 m (`NearbyRecall.radiusMetres`) — tight enough to mea
   and ids in `models/entry.dart` accordingly. Reads are keyed by field id, so
   entries written before location existed still load — the missing ids come back
   `null`.
+- **`Color.withOpacity` is used in ~14 places and was deprecated in Flutter
+  3.27** in favour of `withValues(alpha:)`. It is left as-is deliberately:
+  switching would break builds on SDKs older than 3.27, and this project has
+  never been compiled against a known SDK, so guessing either way is worse than
+  saying so. If your Flutter reports it as removed, the fix is mechanical —
+  `x.withOpacity(0.8)` becomes `x.withValues(alpha: 0.8)`.
 - **Map tiles** come from OpenStreetMap's public servers, which are fine for
   development and low volume but are *not* a production tile source. Before
   shipping at volume, swap the `urlTemplate` in `screens/map_screen.dart` for

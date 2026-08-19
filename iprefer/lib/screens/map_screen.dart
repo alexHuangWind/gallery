@@ -257,7 +257,7 @@ class _MapEmptyState extends StatelessWidget {
           children: [
             Text(
               filtered ? 'nothing under that, here' : 'no places yet',
-              style: TextStyle(
+              style: const TextStyle(
                 fontFamily: AppTheme.serif,
                 fontStyle: FontStyle.italic,
                 fontSize: 26,
