@@ -25,6 +25,30 @@ class ArchiveView extends ChangeNotifier {
   PlaceFix? _origin;
   bool _locating = false;
   bool _originUnavailable = false;
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  /// notifyListeners() throws once disposed, and [_resolveOrigin] notifies
+  /// across a gap that can run for ten seconds plus a network geocode.
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Clears everything view-related. Called on sign-out so the next user does
+  /// not inherit the previous one's filter, sort, or last known coordinates.
+  void reset() {
+    _selected.clear();
+    _sort = ArchiveSort.newest;
+    _origin = null;
+    _locating = false;
+    _originUnavailable = false;
+    _notify();
+  }
 
   // --- tags -------------------------------------------------------------
 
@@ -36,13 +60,28 @@ class ArchiveView extends ChangeNotifier {
 
   void toggle(String tag) {
     if (!_selected.remove(tag)) _selected.add(tag);
-    notifyListeners();
+    _notify();
   }
 
   void clear() {
     if (_selected.isEmpty) return;
     _selected.clear();
-    notifyListeners();
+    _notify();
+  }
+
+  /// Forgets selections whose tag no longer exists anywhere.
+  ///
+  /// [effective] hides such a selection from the current build, but it stays in
+  /// `_selected` — so deleting your last "wine" entry and later recording a new
+  /// one would make the archive collapse back onto a filter you cleared days
+  /// ago and never re-applied. Must be called outside build (it notifies);
+  /// main.dart drives it from the store's own change notification.
+  void prune(Iterable<String> available) {
+    if (_selected.isEmpty) return;
+    final keep = available.toSet();
+    final before = _selected.length;
+    _selected.removeWhere((t) => !keep.contains(t));
+    if (_selected.length != before) _notify();
   }
 
   /// The selection restricted to tags that still exist.
@@ -74,7 +113,7 @@ class ArchiveView extends ChangeNotifier {
       return;
     }
     _sort = sort;
-    notifyListeners();
+    _notify();
     if (sort == ArchiveSort.nearest) await _resolveOrigin();
   }
 
@@ -86,7 +125,7 @@ class ArchiveView extends ChangeNotifier {
     if (_locating) return;
     _locating = true;
     _originUnavailable = false;
-    notifyListeners();
+    _notify();
 
     // prompt: true is right here and nowhere else on this screen — the user
     // just asked to sort by distance, so the permission dialog has an obvious
@@ -96,7 +135,7 @@ class ArchiveView extends ChangeNotifier {
     _origin = fix ?? _origin;
     _originUnavailable = fix == null && _origin == null;
     _locating = false;
-    notifyListeners();
+    _notify();
   }
 
   /// Applies [sort] to an already-filtered list.
@@ -108,14 +147,6 @@ class ArchiveView extends ChangeNotifier {
     final from = _origin;
     if (_sort != ArchiveSort.nearest || from == null) return entries;
 
-    return [...entries]..sort((a, b) {
-        final byDistance = a
-            .metresTo(from.latitude, from.longitude)
-            .compareTo(b.metresTo(from.latitude, from.longitude));
-        if (byDistance != 0) return byDistance;
-        // Dart's sort is not stable, so ties need an explicit rule or entries
-        // without a fix (all tied at infinity) would shuffle on every rebuild.
-        return b.createdAt.compareTo(a.createdAt);
-      });
+    return sortedByDistanceFrom(entries, from.latitude, from.longitude);
   }
 }

@@ -31,7 +31,10 @@ class TagFilterBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         children: [
-          if (active.isNotEmpty) ...[
+          // Keyed off the raw selection, not `active`: a selection whose tag
+          // has since been deleted is invisible here but still live, and this
+          // is the only control that can clear it.
+          if (!view.isEmpty) ...[
             _Chip(
               label: 'all',
               selected: false,

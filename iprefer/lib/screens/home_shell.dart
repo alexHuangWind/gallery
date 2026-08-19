@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../data/archive_view.dart';
 import '../data/session.dart';
 import '../theme.dart';
 import 'archive_screen.dart';
@@ -33,7 +34,10 @@ class _HomeShellState extends State<HomeShell> {
           IconButton(
             tooltip: 'sign out',
             icon: const Icon(Icons.logout, size: 20),
-            onPressed: () => context.read<Session>().signOut(),
+            onPressed: () {
+              context.read<ArchiveView>().reset();
+              context.read<Session>().signOut();
+            },
           ),
         ],
       ),

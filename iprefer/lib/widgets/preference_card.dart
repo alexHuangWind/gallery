@@ -49,6 +49,11 @@ class _PreferenceCardState extends State<PreferenceCard> {
   /// Dark tone sampled from the bottom of the photo (value dropped in HSV).
   Color _scrim = const Color(0xCC101010);
 
+  /// Guards against a slower extraction for a previous photo landing last and
+  /// painting its scrim onto this card. Grid tiles are recycled by index, so
+  /// scrolling or re-sorting starts several extractions on the same State.
+  int _scrimRequest = 0;
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +69,7 @@ class _PreferenceCardState extends State<PreferenceCard> {
   }
 
   Future<void> _extractScrim() async {
+    final request = ++_scrimRequest;
     try {
       // `region` is expressed in the coordinate space of `size`, so we sample
       // the bottom third of a small 9:16 proxy — where the text will sit.
@@ -85,9 +91,8 @@ class _PreferenceCardState extends State<PreferenceCard> {
           .withValue((hsv.value * 0.35).clamp(0.0, 0.32))
           .withSaturation((hsv.saturation * 0.7).clamp(0.0, 0.6))
           .toColor();
-      if (mounted) {
-        setState(() => _scrim = scrim.withOpacity(0.92));
-      }
+      if (!mounted || request != _scrimRequest) return; // a newer photo won
+      setState(() => _scrim = scrim.withOpacity(0.92));
     } catch (_) {
       // Keep the neutral fallback scrim; a failed sample must not break the card.
     }
@@ -102,8 +107,20 @@ class _PreferenceCardState extends State<PreferenceCard> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Full-bleed photo.
-            Image(image: widget.image, fit: BoxFit.cover),
+            // Full-bleed photo. An errorBuilder matters most here: this is the
+            // widget that gets exported, and a missing file would otherwise
+            // throw on every rebuild instead of degrading to a placeholder.
+            Image(
+              image: widget.image,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const ColoredBox(
+                color: Color(0xFFEDEAE3),
+                child: Center(
+                  child: Icon(Icons.image_not_supported_outlined,
+                      size: 26, color: AppTheme.muted),
+                ),
+              ),
+            ),
 
             // Bottom scrim: transparent → photo's own dark tone.
             Align(
@@ -244,9 +261,25 @@ class _Lockup extends StatelessWidget {
 ///
 /// [pixelRatio] of 3 gives a crisp, Story-ready export from the on-screen card.
 Future<Uint8List> capturePng(GlobalKey boundaryKey, {double pixelRatio = 3}) async {
+  // Let any in-flight scrim/photo frame settle first: toImage() captures what
+  // is painted at this instant, and in debug it asserts the boundary is clean.
+  await WidgetsBinding.instance.endOfFrame;
+
   final boundary =
-      boundaryKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      boundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+  if (boundary == null) {
+    throw StateError('the card is no longer on screen');
+  }
+
   final ui.Image image = await boundary.toImage(pixelRatio: pixelRatio);
-  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-  return byteData!.buffer.asUint8List();
+  try {
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) {
+      throw StateError('could not encode the card');
+    }
+    return byteData.buffer.asUint8List();
+  } finally {
+    // ~8 MB of native memory per share at pixelRatio 3 if this is skipped.
+    image.dispose();
+  }
 }

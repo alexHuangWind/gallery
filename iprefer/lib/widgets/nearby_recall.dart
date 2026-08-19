@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' show DateFormat;
 import 'package:provider/provider.dart';
@@ -36,21 +34,43 @@ class NearbyRecall extends StatefulWidget {
   State<NearbyRecall> createState() => _NearbyRecallState();
 }
 
-class _NearbyRecallState extends State<NearbyRecall> {
+class _NearbyRecallState extends State<NearbyRecall>
+    with WidgetsBindingObserver {
   PlaceFix? _here;
   bool _dismissed = false;
+  int _lookRequest = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _look();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // HomeShell keeps this State alive for the whole session via IndexedStack,
+    // so without re-reading on resume the recall would answer for wherever the
+    // user launched the app this morning — which is exactly the case this
+    // feature exists to catch.
+    if (state == AppLifecycleState.resumed) {
+      _dismissed = false;
+      _look();
+    }
+  }
+
   Future<void> _look() async {
+    final request = ++_lookRequest;
     // passive() returns null unless permission was already granted, so this
     // never shows a system dialog on launch.
     final fix = await LocationService.passive(reverseGeocode: true);
-    if (!mounted) return;
+    if (!mounted || request != _lookRequest) return;
     setState(() => _here = fix);
   }
 
@@ -132,7 +152,7 @@ class _RecallChip extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: Image.file(
-                File(entry.localPath),
+                EntryStore.fileFor(entry),
                 width: 64,
                 height: 114,
                 fit: BoxFit.cover,

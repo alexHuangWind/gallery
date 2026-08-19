@@ -67,9 +67,9 @@ void main() {
     expect(restored.hasLocation, isFalse);
     expect(restored.latitude, isNull);
     expect(restored.placeLabel, isNull);
-    // Entries written before tags existed must read back as untagged, not fail.
     expect(restored.tags, isEmpty);
     // An unlocated entry must never satisfy a proximity test.
     expect(restored.metresTo(-37.7983, 144.9784), double.infinity);
   });
+
 }

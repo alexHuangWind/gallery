@@ -59,38 +59,65 @@ class _CardScreenState extends State<CardScreen> {
 
   List<String> get _tags => widget.entry?.tags ?? widget.tags;
 
-  File get _imageFile =>
-      widget.entry != null ? File(widget.entry!.localPath) : widget.photo!;
+  File get _imageFile => widget.entry != null
+      ? EntryStore.fileFor(widget.entry!)
+      : widget.photo!;
+
+  /// Share stays disabled until the photo has actually decoded. toImage()
+  /// captures whatever is painted right now, so sharing early exports a card
+  /// with the lockup floating over nothing.
+  bool _imageReady = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_imageReady) return;
+    precacheImage(FileImage(_imageFile), context).whenComplete(() {
+      if (mounted) setState(() => _imageReady = true);
+    });
+  }
 
   Future<void> _save() async {
     if (_busy || _saved) return;
     setState(() => _busy = true);
+
+    // Captured before the first await. Copying the photo is a platform round
+    // trip plus a file copy; if the user taps back during it, reading these
+    // from a deactivated context throws, the error is swallowed, and the entry
+    // is lost with no message — after the photo was already written to disk.
+    final store = context.read<EntryStore>();
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    String? storedName;
     try {
       final id = const Uuid().v4();
-      final storedPath = await EntryStore.persistPhoto(_imageFile.path, id);
+      storedName = await EntryStore.persistPhoto(_imageFile.path, id);
       final entry = Entry(
         id: id,
-        localPath: storedPath,
+        localPath: storedName,
         text: _text,
         createdAt: _composeDate,
         latitude: widget.fix?.latitude,
         longitude: widget.fix?.longitude,
         placeLabel: widget.fix?.label,
-        tags: normalizeTags(widget.tags),
+        tags: widget.tags,
       );
-      await context.read<EntryStore>().add(entry);
-      if (mounted) {
-        setState(() => _saved = true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('saved to your timeline')),
-        );
-      }
+      await store.add(entry);
+      _saved = true;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('saved to your timeline')),
+      );
+      // Back to the timeline. Without this the user is left on a saved card
+      // whose back button returns to a compose screen still holding the photo
+      // and text — tapping through again silently saves a duplicate.
+      navigator.popUntil((route) => route.isFirst);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("couldn't save — please try again")),
-        );
-      }
+      // The photo was copied before the record failed; nothing references it.
+      if (storedName != null) await EntryStore.discardPhoto(storedName);
+      messenger.showSnackBar(
+        const SnackBar(content: Text("couldn't save — please try again")),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -99,17 +126,25 @@ class _CardScreenState extends State<CardScreen> {
   Future<void> _share() async {
     if (_busy) return;
     setState(() => _busy = true);
+
+    final messenger = ScaffoldMessenger.of(context);
+    // iPad presents the share sheet as a popover and UIKit raises a *native*
+    // exception when it has no anchor rect — which no Dart catch can intercept.
+    final box = context.findRenderObject() as RenderBox?;
+
     try {
       final bytes = await capturePng(_boundaryKey);
       final id = widget.entry?.id ?? 'preview';
       final file = await EntryStore.writeShareablePng(bytes, id);
-      await Share.shareXFiles([XFile(file.path)]);
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        sharePositionOrigin:
+            box == null ? null : box.localToGlobal(Offset.zero) & box.size,
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("couldn't prepare the image to share")),
-        );
-      }
+      messenger.showSnackBar(
+        const SnackBar(content: Text("couldn't prepare the image to share")),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -180,7 +215,7 @@ class _CardScreenState extends State<CardScreen> {
                   ],
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: _busy ? null : _share,
+                      onPressed: (_busy || !_imageReady) ? null : _share,
                       icon: const Icon(Icons.ios_share, size: 18),
                       label: const Text('share'),
                     ),

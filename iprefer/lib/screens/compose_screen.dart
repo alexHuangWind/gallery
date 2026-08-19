@@ -28,6 +28,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
   _FixState _fixState = _FixState.idle;
   List<String> _tags = const [];
 
+  /// The in-flight location lookup, so "make card" can give it a moment to
+  /// land instead of silently saving a placeless entry.
+  Future<void>? _locating;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -42,10 +46,13 @@ class _ComposeScreenState extends State<ComposeScreen> {
         imageQuality: 90,
       );
       if (picked != null) {
+        // pickImage hands control to another app for an unbounded time; the
+        // route can be gone by the time it returns.
+        if (!mounted) return;
         setState(() => _photo = File(picked.path));
         // Only now do we ask for location: the user has committed to recording
         // something, so the permission prompt has an obvious reason attached.
-        _locate();
+        _locating = _locate();
       }
     } catch (e) {
       if (mounted) {
@@ -74,9 +81,19 @@ class _ComposeScreenState extends State<ComposeScreen> {
     });
   }
 
-  void _makeCard() {
+  Future<void> _makeCard() async {
     final text = _controller.text.trim();
     if (_photo == null || text.isEmpty) return;
+
+    // A cold GPS plus a reverse geocode can outlast a fast typist. Without this
+    // the entry is written placeless — no pin, no recall, invisible to
+    // "nearest" — while the fix lands seconds later on a screen already left.
+    // Bounded, because location must never block recording.
+    if (_fixState == _FixState.locating && _locating != null) {
+      await _locating!.timeout(const Duration(seconds: 2), onTimeout: () {});
+    }
+    if (!mounted) return;
+
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) =>
@@ -103,7 +120,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 _PlaceRow(
                   state: _fixState,
                   fix: _fix,
-                  onRetry: _locate,
+                  onRetry: () => _locating = _locate(),
                   onDrop: _dropFix,
                 ),
               ],

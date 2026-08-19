@@ -35,11 +35,10 @@ class LocationService {
 
   /// Current position, or null if unavailable.
   ///
-  /// [prompt] controls whether we may show the OS permission dialog. The
-  /// timeline's "you've been here before" check passes false — surfacing a
-  /// system prompt on app launch, before the user has asked for anything, is
-  /// the wrong trade. Compose passes true, because there the user has just
-  /// chosen to record something.
+  /// [prompt] controls whether we may show the OS permission dialog. Callers
+  /// that appear on their own use [passive] instead; this is for moments the
+  /// user actively asked for — choosing a photo to record, or switching the
+  /// timeline to "nearest" — where a dialog has a visible reason attached.
   static Future<PlaceFix?> current({
     bool prompt = false,
     bool reverseGeocode = true,
@@ -53,8 +52,11 @@ class LocationService {
         if (!prompt) return null;
         permission = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
+      // Allow-list rather than deny-list: `unableToDetermine` used to fall
+      // through to getCurrentPosition, which is itself a prompting call — so a
+      // caller passing prompt: false could still raise the system dialog.
+      if (permission != LocationPermission.always &&
+          permission != LocationPermission.whileInUse) {
         return null;
       }
 
@@ -93,6 +95,7 @@ class LocationService {
   static Future<PlaceFix?> passive({
     bool reverseGeocode = false,
     Duration timeout = const Duration(seconds: 6),
+    Duration maxAge = const Duration(minutes: 10),
   }) async {
     try {
       if (!await hasPermission()) return null;
@@ -100,7 +103,14 @@ class LocationService {
 
       Position? position;
       try {
-        position = await Geolocator.getLastKnownPosition();
+        final cached = await Geolocator.getLastKnownPosition();
+        // An unbounded-age fix is worse than none here: fly Melbourne to
+        // Sydney with location off and yesterday's fix would announce "you've
+        // been in fitzroy before" while you stand in another city.
+        if (cached != null &&
+            DateTime.now().difference(cached.timestamp).abs() <= maxAge) {
+          position = cached;
+        }
       } catch (_) {
         position = null; // unsupported on this platform — fall through
       }

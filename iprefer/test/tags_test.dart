@@ -44,13 +44,35 @@ void main() {
     });
   });
 
+  group('Entry normalizes its own tags', () {
+    test('the constructor normalizes, so no caller can store a raw tag', () {
+      final e = _tagged('a', const ['  Wine ', '#DISH', 'wine']);
+      expect(e.tags, ['wine', 'dish']);
+    });
+
+    test('emoji tags are not truncated into the same lone surrogate', () {
+      // Both are 25 UTF-16 code units; a naive cut at 24 leaves the identical
+      // high surrogate and silently merges two different shelves into one.
+      final wine = normalizeTags(['${'a' * 23}🍷']).single;
+      final beer = normalizeTags(['${'a' * 23}🍺']).single;
+      expect(wine, isNot(equals(beer)));
+    });
+  });
+
   group('Entry.hasTag', () {
-    test('matches regardless of the caller casing', () {
+    test('matches regardless of how the caller wrote the query', () {
       final e = _tagged('a', const ['wine']);
       expect(e.hasTag('wine'), isTrue);
       expect(e.hasTag('WINE'), isTrue);
       expect(e.hasTag(' wine '), isTrue);
+      // hasTag must apply every rule normalizeTags does, not just some.
+      expect(e.hasTag('#Wine'), isTrue);
       expect(e.hasTag('dish'), isFalse);
+    });
+
+    test('matches a stored tag whose internal spacing was collapsed', () {
+      final e = _tagged('a', const ['red wine']);
+      expect(e.hasTag('red   wine'), isTrue);
     });
 
     test('an untagged entry matches nothing', () {
@@ -58,11 +80,7 @@ void main() {
     });
   });
 
-  group('tag filtering semantics', () {
-    // Mirrors EntryStore.withAnyTag: any selected tag is enough (OR).
-    List<Entry> withAnyTag(List<Entry> all, Set<String> tags) =>
-        tags.isEmpty ? all : all.where((e) => tags.any(e.hasTag)).toList();
-
+  group('entriesWithAnyTag', () {
     final entries = [
       _tagged('a', const ['wine', 'dish']),
       _tagged('b', const ['wine']),
@@ -71,25 +89,33 @@ void main() {
     ];
 
     test('an empty filter keeps everything', () {
-      expect(withAnyTag(entries, {}).length, 4);
+      expect(entriesWithAnyTag(entries, {}).length, 4);
     });
 
     test('one tag keeps every entry carrying it', () {
-      expect(withAnyTag(entries, {'wine'}).map((e) => e.id), ['a', 'b']);
+      expect(entriesWithAnyTag(entries, {'wine'}).map((e) => e.id), ['a', 'b']);
     });
 
     test('more tags widen the result rather than narrowing it', () {
-      expect(withAnyTag(entries, {'wine', 'grocery'}).map((e) => e.id),
+      expect(entriesWithAnyTag(entries, {'wine', 'grocery'}).map((e) => e.id),
           ['a', 'b', 'c']);
     });
 
     test('a tag already covered by another adds nothing new', () {
       // 'dish' only appears on 'a', which 'wine' already matched.
-      expect(withAnyTag(entries, {'wine', 'dish'}).map((e) => e.id), ['a', 'b']);
+      expect(entriesWithAnyTag(entries, {'wine', 'dish'}).map((e) => e.id),
+          ['a', 'b']);
     });
 
     test('untagged entries are excluded once any filter is on', () {
-      expect(withAnyTag(entries, {'wine'}).map((e) => e.id), isNot(contains('d')));
+      expect(entriesWithAnyTag(entries, {'wine'}).map((e) => e.id),
+          isNot(contains('d')));
+    });
+
+    test('matches a query the user typed loosely', () {
+      // The chip label and the stored tag both went through normalizeTags, so
+      // a filter must still match when the caller did not normalize.
+      expect(entriesWithAnyTag(entries, {'#Wine'}).map((e) => e.id), ['a', 'b']);
     });
   });
 }

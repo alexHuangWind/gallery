@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -22,21 +20,68 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final _controller = MapController();
   LatLng? _me;
+  int _findRequest = 0;
+
+  /// Identifies the current pin set, so the camera is re-fitted when the tag
+  /// filter changes the pins but not on every unrelated rebuild — which would
+  /// yank the user's pan and zoom back on each store notification.
+  String? _fittedSignature;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _findMe();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // IndexedStack keeps this State for the whole session, so without this the
+    // "you are here" dot stays frozen wherever the app was launched.
+    if (state == AppLifecycleState.resumed) _findMe();
   }
 
   /// Passive: only shows the "you are here" dot if permission already exists.
   Future<void> _findMe() async {
+    final request = ++_findRequest;
     final fix = await LocationService.passive();
-    if (!mounted || fix == null) return;
+    if (!mounted || fix == null || request != _findRequest) return;
     setState(() => _me = LatLng(fix.latitude, fix.longitude));
+  }
+
+  /// Moves the camera when the pin set actually changes.
+  ///
+  /// `initialCameraFit` applies once at construction, so filtering down to a
+  /// different city would otherwise leave the user staring at empty ocean.
+  void _fitTo(List<LatLng> points) {
+    final signature = points.map((p) => '${p.latitude},${p.longitude}').join(';');
+    if (signature == _fittedSignature) return;
+    _fittedSignature = signature;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || points.isEmpty) return;
+      if (points.length == 1) {
+        _controller.move(points.first, 15);
+      } else {
+        _controller.fitCamera(
+          CameraFit.bounds(
+            bounds: LatLngBounds.fromPoints(points),
+            padding: const EdgeInsets.all(64),
+            maxZoom: 16,
+          ),
+        );
+      }
+    });
   }
 
   @override
@@ -58,6 +103,7 @@ class _MapScreenState extends State<MapScreen> {
     final points = [
       for (final e in located) LatLng(e.latitude!, e.longitude!),
     ];
+    _fitTo(points);
 
     return Column(
       children: [
@@ -166,7 +212,7 @@ class _EntryPin extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: Image.file(
-          File(entry.localPath),
+          EntryStore.fileFor(entry),
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Container(color: AppTheme.muted),
         ),

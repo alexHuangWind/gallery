@@ -21,7 +21,7 @@ class Entry {
     this.longitude,
     this.placeLabel,
     List<String>? tags,
-  }) : tags = tags ?? const [];
+  }) : tags = tags == null ? const [] : normalizeTags(tags);
 
   final String id;
 
@@ -43,30 +43,19 @@ class Entry {
 
   /// What kind of thing this is: "wine", "dish", "grocery".
   ///
-  /// Always normalized (lowercase, trimmed, deduped) via [normalizeTags], so
-  /// "Wine" and " wine " can never split one shelf into two. Empty is normal.
+  /// Normalized by the constructor, not merely by convention — every path in
+  /// and out of storage runs through [normalizeTags], so "Wine" and " wine "
+  /// cannot split one shelf into two even if a caller forgets. Empty is normal.
   final List<String> tags;
 
   bool get hasLocation => latitude != null && longitude != null;
 
-  bool hasTag(String tag) => tags.contains(tag.trim().toLowerCase());
-
-  Entry copyWith({
-    double? latitude,
-    double? longitude,
-    String? placeLabel,
-    List<String>? tags,
-  }) {
-    return Entry(
-      id: id,
-      localPath: localPath,
-      text: text,
-      createdAt: createdAt,
-      latitude: latitude ?? this.latitude,
-      longitude: longitude ?? this.longitude,
-      placeLabel: placeLabel ?? this.placeLabel,
-      tags: tags ?? this.tags,
-    );
+  /// Normalizes the query the same way the stored tags were normalized —
+  /// anything less and `hasTag('#Wine')` misses a stored `wine`, which would
+  /// let a lit filter chip match nothing.
+  bool hasTag(String tag) {
+    final normalized = normalizeTags([tag]);
+    return normalized.isNotEmpty && tags.contains(normalized.first);
   }
 
   /// Great-circle distance in metres from this entry to a point.
@@ -77,6 +66,38 @@ class Entry {
     if (!hasLocation) return double.infinity;
     return haversineMetres(latitude!, longitude!, lat, lng);
   }
+}
+
+/// Entries carrying *any* of [tags] (OR), preserving the incoming order.
+///
+/// An empty selection means "no filter", so everything comes back. Lives here
+/// as a pure function so both [EntryStore] and its tests exercise this exact
+/// code rather than a copy that can drift.
+List<Entry> entriesWithAnyTag(Iterable<Entry> entries, Set<String> tags) {
+  if (tags.isEmpty) return entries.toList();
+  return entries.where((e) => tags.any(e.hasTag)).toList();
+}
+
+/// Entries ordered by distance from a point, closest first.
+///
+/// Entries with no fix tie at infinity and are held newest-first by an explicit
+/// tiebreak — Dart's [List.sort] is not stable, so without it they would
+/// reshuffle on every rebuild.
+List<Entry> sortedByDistanceFrom(
+  Iterable<Entry> entries,
+  double latitude,
+  double longitude,
+) {
+  // Decorate-sort-undecorate: the comparator would otherwise recompute two
+  // square roots per comparison, and this runs on every archive rebuild.
+  final decorated = [
+    for (final e in entries) (entry: e, metres: e.metresTo(latitude, longitude)),
+  ]..sort((a, b) {
+      final byDistance = a.metres.compareTo(b.metres);
+      if (byDistance != 0) return byDistance;
+      return b.entry.createdAt.compareTo(a.entry.createdAt);
+    });
+  return [for (final d in decorated) d.entry];
 }
 
 /// Cleans user-entered tags into the one form we store and compare.
@@ -95,7 +116,15 @@ List<String> normalizeTags(Iterable<String> raw) {
     }
     value = value.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (value.isEmpty) continue;
-    if (value.length > maxLength) value = value.substring(0, maxLength).trim();
+    if (value.length > maxLength) {
+      // length/substring count UTF-16 code units, so a naive cut can land
+      // between the halves of an emoji and leave a lone surrogate — which two
+      // different emoji would both truncate to, silently merging two shelves.
+      var cut = maxLength;
+      final unit = value.codeUnitAt(cut - 1);
+      if (unit >= 0xD800 && unit <= 0xDBFF) cut -= 1;
+      value = value.substring(0, cut).trim();
+    }
     if (value.isEmpty) continue;
     if (seen.add(value)) out.add(value);
   }
@@ -112,9 +141,19 @@ double haversineMetres(double lat1, double lon1, double lat2, double lon2) {
 
   final dLat = toRad(lat2 - lat1);
   final dLon = toRad(lon2 - lon1);
-  final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-      math.cos(toRad(lat1)) * math.cos(toRad(lat2)) * math.sin(dLon / 2) * math.sin(dLon / 2);
-  return earthRadius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+
+  // For near-antipodal points `a` exceeds 1 by a floating-point ulp, and
+  // sqrt(1 - a) is then NaN. NaN outranks infinity in Dart's compareTo, so an
+  // entry on the far side of the globe would sort *behind* entries with no
+  // location at all. Clamp, and use asin so there is no 1 - a term to go
+  // negative in the first place.
+  final a = (math.sin(dLat / 2) * math.sin(dLat / 2) +
+          math.cos(toRad(lat1)) *
+              math.cos(toRad(lat2)) *
+              math.sin(dLon / 2) *
+              math.sin(dLon / 2))
+      .clamp(0.0, 1.0);
+  return earthRadius * 2 * math.asin(math.sqrt(a));
 }
 
 /// Hand-written Hive adapter so the project builds without code generation
@@ -133,18 +172,23 @@ class EntryAdapter extends TypeAdapter<Entry> {
     for (var i = 0; i < count; i++) {
       fields[reader.readByte()] = reader.read();
     }
+    // Every cast here is defensive on purpose. `openBox` is non-lazy: it
+    // deserializes the whole archive at startup, so a single torn record with a
+    // hard cast would throw before runApp and leave the user with a black
+    // screen and no way back to their entries.
     return Entry(
-      id: fields[0] as String,
-      localPath: fields[1] as String,
-      text: fields[2] as String,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(fields[3] as int),
+      id: fields[0] as String? ?? '',
+      localPath: fields[1] as String? ?? '',
+      text: fields[2] as String? ?? '',
+      createdAt: DateTime.fromMillisecondsSinceEpoch((fields[3] as int?) ?? 0),
       latitude: fields[4] as double?,
       longitude: fields[5] as double?,
       placeLabel: fields[6] as String?,
       // Absent for entries written before tags existed — an empty list, not an
-      // error. Hive hands back List<dynamic>, so copy into a typed list rather
-      // than casting lazily.
-      tags: fields[7] == null ? const [] : List<String>.from(fields[7] as List),
+      // error. Hive hands back List<dynamic>, so copy into a typed list.
+      tags: fields[7] is List
+          ? (fields[7] as List).whereType<String>().toList()
+          : const [],
     );
   }
 

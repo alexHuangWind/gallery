@@ -17,14 +17,35 @@ class EntryStore extends ChangeNotifier {
 
   final Box<Entry> _box;
 
+  /// Absolute path of the photos directory, resolved once at [open].
+  ///
+  /// Entries store only a file *name* (see [persistPhoto]); this is what turns
+  /// one back into a file.
+  static String? _photosRoot;
+
   /// Opens Hive and the entries box. Call once during app startup.
   static Future<EntryStore> open() async {
     await Hive.initFlutter();
     if (!Hive.isAdapterRegistered(1)) {
       Hive.registerAdapter(EntryAdapter());
     }
+    final docs = await getApplicationDocumentsDirectory();
+    _photosRoot = p.join(docs.path, 'photos');
     final box = await Hive.openBox<Entry>(_boxName);
     return EntryStore._(box);
+  }
+
+  /// Resolves an entry's photo to a file.
+  ///
+  /// iOS regenerates the app container's UUID on reinstall and on some OS
+  /// updates, so an absolute path stored today is dangling tomorrow and the
+  /// entire archive turns to grey rectangles. New entries therefore store just
+  /// the file name; the absolute branch is kept so records written before this
+  /// change still resolve.
+  static File fileFor(Entry entry) {
+    final stored = entry.localPath;
+    if (p.isAbsolute(stored) || _photosRoot == null) return File(stored);
+    return File(p.join(_photosRoot!, stored));
   }
 
   /// All entries, newest first.
@@ -57,7 +78,8 @@ class EntryStore extends ChangeNotifier {
   Map<String, int> get tagCounts {
     final counts = <String, int>{};
     for (final e in _box.values) {
-      for (final t in e.tags) {
+      // toSet(): one entry counts once per tag even if its list repeats one.
+      for (final t in e.tags.toSet()) {
         counts[t] = (counts[t] ?? 0) + 1;
       }
     }
@@ -69,10 +91,7 @@ class EntryStore extends ChangeNotifier {
   /// Selecting more tags widens the archive rather than narrowing it: picking
   /// "wine" and "dish" shows everything under either shelf. An empty selection
   /// means no filter at all, so everything comes back.
-  List<Entry> withAnyTag(Set<String> tags) {
-    if (tags.isEmpty) return entries;
-    return entries.where((e) => tags.any(e.hasTag)).toList();
-  }
+  List<Entry> withAnyTag(Set<String> tags) => entriesWithAnyTag(entries, tags);
 
   /// Entries recorded within [radiusMetres] of a point, nearest first.
   ///
@@ -84,19 +103,11 @@ class EntryStore extends ChangeNotifier {
     double latitude,
     double longitude, {
     double radiusMetres = 200,
-    String? excludeId,
     Set<String> tags = const {},
   }) {
-    final hits = <Entry>[];
-    for (final e in withAnyTag(tags)) {
-      if (e.id == excludeId) continue;
-      final d = e.metresTo(latitude, longitude);
-      if (d <= radiusMetres) hits.add(e);
-    }
-    hits.sort((a, b) => a
-        .metresTo(latitude, longitude)
-        .compareTo(b.metresTo(latitude, longitude)));
-    return hits;
+    final hits = withAnyTag(tags)
+        .where((e) => e.metresTo(latitude, longitude) <= radiusMetres);
+    return sortedByDistanceFrom(hits, latitude, longitude);
   }
 
   Entry? byId(String id) => _box.get(id);
@@ -108,34 +119,52 @@ class EntryStore extends ChangeNotifier {
 
   Future<void> delete(String id) async {
     final entry = _box.get(id);
+
+    // Record first, photo second. If this is interrupted between the two, an
+    // orphaned file is invisible and costs only disk, whereas an orphaned
+    // record is a permanently broken tile the app offers no way to repair.
+    await _box.delete(id);
+
     if (entry != null) {
-      // Best-effort cleanup of the on-disk photo; the record is the source of
-      // truth, so a failed file delete must not block removing the entry.
       try {
-        final file = File(entry.localPath);
+        final file = fileFor(entry);
         if (file.existsSync()) {
           await file.delete();
         }
       } catch (_) {}
     }
-    await _box.delete(id);
     notifyListeners();
   }
 
-  /// Copies a picked photo into app-private storage and returns the new path.
+  /// Copies a picked photo into app-private storage and returns its file name.
   ///
   /// We never reference the picker's temp/cache path directly — it can be
   /// reclaimed by the OS — so the card always has a stable file to render.
   static Future<String> persistPhoto(String sourcePath, String entryId) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final photosDir = Directory(p.join(dir.path, 'photos'));
+    final docs = await getApplicationDocumentsDirectory();
+    final photosDir = Directory(p.join(docs.path, 'photos'));
     if (!photosDir.existsSync()) {
       photosDir.createSync(recursive: true);
     }
+    _photosRoot = photosDir.path;
     final ext = p.extension(sourcePath).isNotEmpty ? p.extension(sourcePath) : '.jpg';
-    final dest = p.join(photosDir.path, '$entryId$ext');
-    await File(sourcePath).copy(dest);
-    return dest;
+    final name = '$entryId$ext';
+    await File(sourcePath).copy(p.join(photosDir.path, name));
+    // Name only — see [fileFor] for why the absolute path must not be stored.
+    return name;
+  }
+
+  /// Deletes a photo that no record ended up referencing.
+  ///
+  /// Saving copies the photo before writing the record; if the write then
+  /// fails, that copy would otherwise sit in app documents forever.
+  static Future<void> discardPhoto(String storedName) async {
+    try {
+      final root = _photosRoot;
+      if (root == null) return;
+      final file = File(p.join(root, storedName));
+      if (file.existsSync()) await file.delete();
+    } catch (_) {}
   }
 
   /// Writes exported PNG bytes (the rendered card) to a temp file for sharing.

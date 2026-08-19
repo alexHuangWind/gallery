@@ -1,4 +1,3 @@
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -59,7 +58,10 @@ class ArchiveScreen extends StatelessWidget {
               childAspectRatio: 9 / 16,
             ),
             delegate: SliverChildBuilderDelegate(
-              (context, i) => _ArchiveTile(entry: entries[i]),
+              // Keyed so recycling doesn't carry one card's extracted scrim
+              // over to another photo when the list re-sorts.
+              (context, i) =>
+                  _ArchiveTile(key: ValueKey(entries[i].id), entry: entries[i]),
               childCount: entries.length,
             ),
           ),
@@ -70,7 +72,7 @@ class ArchiveScreen extends StatelessWidget {
 }
 
 class _ArchiveTile extends StatelessWidget {
-  const _ArchiveTile({required this.entry});
+  const _ArchiveTile({super.key, required this.entry});
 
   final Entry entry;
 
@@ -103,7 +105,7 @@ class _ArchiveTile extends StatelessWidget {
       onTap: () => _open(context),
       onLongPress: () => _confirmDelete(context),
       child: PreferenceCard(
-        image: FileImage(File(entry.localPath)),
+        image: FileImage(EntryStore.fileFor(entry)),
         text: entry.text,
         createdAt: entry.createdAt,
         placeLabel: entry.placeLabel,

@@ -38,8 +38,13 @@ class _TagInputState extends State<TagInput> {
 
   void _add(String raw) {
     final next = normalizeTags([...widget.tags, raw]);
-    _controller.clear();
-    if (next.length != widget.tags.length) widget.onChanged(next);
+    final accepted = next.length != widget.tags.length;
+    // Clearing unconditionally made a re-typed duplicate vanish with no
+    // feedback, as though the keystrokes were never registered.
+    if (accepted) {
+      _controller.clear();
+      widget.onChanged(next);
+    }
     setState(() {});
   }
 
@@ -101,9 +106,16 @@ class _TagInputState extends State<TagInput> {
                     _focus.requestFocus();
                   },
                   onTapOutside: (_) {
+                    // Fires on pointer-DOWN. Collapsing the field here reflows
+                    // the Wrap out from under the finger, so the tap the user
+                    // is making — on a suggestion chip, or on "make card" —
+                    // lands on nothing and appears to be ignored. Only reflow
+                    // when there is actually something to commit.
+                    if (!_focus.hasFocus) return;
+                    _focus.unfocus();
+                    if (_controller.text.trim().isEmpty) return;
                     _add(_controller.text);
                     setState(() => _typing = false);
-                    _focus.unfocus();
                   },
                 ),
               )
