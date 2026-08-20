@@ -19,6 +19,14 @@ enum ArchiveSort {
 /// to the map should answer "where do I like wine?" rather than silently
 /// resetting. One view state, two presentations of the same set.
 class ArchiveView extends ChangeNotifier {
+  /// [getFix] exists as a seam: production wiring keeps the default (the real
+  /// location stack), tests inject a fake to drive the sort state machine
+  /// deterministically. It is the only injection point this class needs.
+  ArchiveView({Future<PlaceFix?> Function({bool prompt}) getFix = LocationService.current})
+      : _getFix = getFix;
+
+  final Future<PlaceFix?> Function({bool prompt}) _getFix;
+
   final Set<String> _selected = <String>{};
   ArchiveSort _sort = ArchiveSort.newest;
 
@@ -130,7 +138,7 @@ class ArchiveView extends ChangeNotifier {
     // prompt: true is right here and nowhere else on this screen — the user
     // just asked to sort by distance, so the permission dialog has an obvious
     // reason attached.
-    final fix = await LocationService.current(prompt: true);
+    final fix = await _getFix(prompt: true);
 
     _origin = fix ?? _origin;
     _originUnavailable = fix == null && _origin == null;

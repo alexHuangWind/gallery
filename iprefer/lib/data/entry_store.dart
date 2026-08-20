@@ -4,14 +4,26 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/entry.dart';
+
+/// How close "you've been here before" considers *here*. One product decision,
+/// one constant: both the store's default and the recall widget's read this,
+/// so the radius cannot silently fork between the two.
+const double kRecallRadiusMetres = 200;
 
 /// Hive-backed local store for [Entry] records. CRUD only — no cloud, no auth.
 ///
 /// Notifies listeners on every mutation so the timeline rebuilds.
 class EntryStore extends ChangeNotifier {
-  EntryStore._(this._box);
+  EntryStore._(this._box, this.photosRoot);
+
+  /// Test seam: a store over an already-open box and an existing directory,
+  /// skipping the platform channels [open] needs. Production code must keep
+  /// going through [open].
+  @visibleForTesting
+  EntryStore.forTest(this._box, {required this.photosRoot});
 
   static const String _boxName = 'entries';
 
@@ -19,9 +31,9 @@ class EntryStore extends ChangeNotifier {
 
   /// Absolute path of the photos directory, resolved once at [open].
   ///
-  /// Entries store only a file *name* (see [persistPhoto]); this is what turns
-  /// one back into a file.
-  static String? _photosRoot;
+  /// Entries store only a file *name* (see [_persistPhoto]); this is what
+  /// turns one back into a file.
+  final String photosRoot;
 
   /// Opens Hive and the entries box. Call once during app startup.
   static Future<EntryStore> open() async {
@@ -30,9 +42,8 @@ class EntryStore extends ChangeNotifier {
       Hive.registerAdapter(EntryAdapter());
     }
     final docs = await getApplicationDocumentsDirectory();
-    _photosRoot = p.join(docs.path, 'photos');
     final box = await Hive.openBox<Entry>(_boxName);
-    return EntryStore._(box);
+    return EntryStore._(box, p.join(docs.path, 'photos'));
   }
 
   /// Resolves an entry's photo to a file.
@@ -42,10 +53,10 @@ class EntryStore extends ChangeNotifier {
   /// entire archive turns to grey rectangles. New entries therefore store just
   /// the file name; the absolute branch is kept so records written before this
   /// change still resolve.
-  static File fileFor(Entry entry) {
+  File fileFor(Entry entry) {
     final stored = entry.localPath;
-    if (p.isAbsolute(stored) || _photosRoot == null) return File(stored);
-    return File(p.join(_photosRoot!, stored));
+    if (p.isAbsolute(stored)) return File(stored);
+    return File(p.join(photosRoot, stored));
   }
 
   /// All entries, newest first.
@@ -102,7 +113,7 @@ class EntryStore extends ChangeNotifier {
   List<Entry> near(
     double latitude,
     double longitude, {
-    double radiusMetres = 200,
+    double radiusMetres = kRecallRadiusMetres,
     Set<String> tags = const {},
   }) {
     final hits = withAnyTag(tags)
@@ -115,6 +126,50 @@ class EntryStore extends ChangeNotifier {
   Future<void> add(Entry entry) async {
     await _box.put(entry.id, entry);
     notifyListeners();
+  }
+
+  /// The whole save transaction: copy the photo into app storage, then write
+  /// the record. This is the only multi-step write in the app, and its
+  /// invariant lives here rather than in a screen so it stays testable.
+  ///
+  /// Ordering contract: the photo is copied *before* the record exists, so a
+  /// crash between the two leaves an invisible orphan file, never a broken
+  /// record. The rollback below can only run when the record write failed —
+  /// the try spans nothing after the put — so it can never delete the photo
+  /// of an entry that made it into the box.
+  Future<Entry> create({
+    required String sourcePhotoPath,
+    required String text,
+    required DateTime createdAt,
+    double? latitude,
+    double? longitude,
+    String? placeLabel,
+    List<String> tags = const [],
+  }) async {
+    final id = const Uuid().v4();
+    final storedName = await _persistPhoto(sourcePhotoPath, id);
+    // Everything after the copy sits inside the rollback try — including the
+    // Entry construction, so a future validation added there cannot silently
+    // open an orphan-photo window.
+    final Entry entry;
+    try {
+      entry = Entry(
+        id: id,
+        localPath: storedName,
+        text: text,
+        createdAt: createdAt,
+        latitude: latitude,
+        longitude: longitude,
+        placeLabel: placeLabel,
+        tags: tags,
+      );
+      await _box.put(id, entry);
+    } catch (_) {
+      await _discardPhoto(storedName);
+      rethrow;
+    }
+    notifyListeners();
+    return entry;
   }
 
   Future<void> delete(String id) async {
@@ -140,14 +195,14 @@ class EntryStore extends ChangeNotifier {
   ///
   /// We never reference the picker's temp/cache path directly — it can be
   /// reclaimed by the OS — so the card always has a stable file to render.
-  static Future<String> persistPhoto(String sourcePath, String entryId) async {
-    final docs = await getApplicationDocumentsDirectory();
-    final photosDir = Directory(p.join(docs.path, 'photos'));
+  Future<String> _persistPhoto(String sourcePath, String entryId) async {
+    final photosDir = Directory(photosRoot);
+    // Re-created on every save, not assumed from open(): the OS may clear it.
     if (!photosDir.existsSync()) {
       photosDir.createSync(recursive: true);
     }
-    _photosRoot = photosDir.path;
-    final ext = p.extension(sourcePath).isNotEmpty ? p.extension(sourcePath) : '.jpg';
+    final ext =
+        p.extension(sourcePath).isNotEmpty ? p.extension(sourcePath) : '.jpg';
     final name = '$entryId$ext';
     await File(sourcePath).copy(p.join(photosDir.path, name));
     // Name only — see [fileFor] for why the absolute path must not be stored.
@@ -155,19 +210,18 @@ class EntryStore extends ChangeNotifier {
   }
 
   /// Deletes a photo that no record ended up referencing.
-  ///
-  /// Saving copies the photo before writing the record; if the write then
-  /// fails, that copy would otherwise sit in app documents forever.
-  static Future<void> discardPhoto(String storedName) async {
+  Future<void> _discardPhoto(String storedName) async {
     try {
-      final root = _photosRoot;
-      if (root == null) return;
-      final file = File(p.join(root, storedName));
+      final file = File(p.join(photosRoot, storedName));
       if (file.existsSync()) await file.delete();
     } catch (_) {}
   }
 
   /// Writes exported PNG bytes (the rendered card) to a temp file for sharing.
+  ///
+  /// Static on purpose: it touches only the temp directory, never the store's
+  /// state, and the share path must keep working even for a card that is not
+  /// (or not yet) a stored entry.
   static Future<File> writeShareablePng(Uint8List bytes, String entryId) async {
     final dir = await getTemporaryDirectory();
     final file = File(p.join(dir.path, 'iprefer_$entryId.png'));

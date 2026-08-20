@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:uuid/uuid.dart';
 
 import '../data/entry_store.dart';
 import '../data/location_service.dart';
@@ -60,7 +59,7 @@ class _CardScreenState extends State<CardScreen> {
   List<String> get _tags => widget.entry?.tags ?? widget.tags;
 
   File get _imageFile => widget.entry != null
-      ? EntryStore.fileFor(widget.entry!)
+      ? context.read<EntryStore>().fileFor(widget.entry!)
       : widget.photo!;
 
   /// Share stays disabled until the photo has actually decoded. toImage()
@@ -68,12 +67,21 @@ class _CardScreenState extends State<CardScreen> {
   /// with the lockup floating over nothing.
   bool _imageReady = false;
 
+  /// The decode failed (dangling legacy path, unreadable file). The gate must
+  /// stay closed: precacheImage's future completes on error too, so without
+  /// this flag a *broken* photo would enable Share and export the placeholder.
+  bool _imageBroken = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_imageReady) return;
-    precacheImage(FileImage(_imageFile), context).whenComplete(() {
-      if (mounted) setState(() => _imageReady = true);
+    if (_imageReady || _imageBroken) return;
+    precacheImage(
+      FileImage(_imageFile),
+      context,
+      onError: (_, __) => _imageBroken = true,
+    ).whenComplete(() {
+      if (mounted && !_imageBroken) setState(() => _imageReady = true);
     });
   }
 
@@ -89,13 +97,11 @@ class _CardScreenState extends State<CardScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
 
-    String? storedName;
     try {
-      final id = const Uuid().v4();
-      storedName = await EntryStore.persistPhoto(_imageFile.path, id);
-      final entry = Entry(
-        id: id,
-        localPath: storedName,
+      // The photo-copy + record-write transaction, including its rollback,
+      // lives in the store — nothing here can damage a saved entry.
+      await store.create(
+        sourcePhotoPath: widget.photo!.path,
         text: _text,
         createdAt: _composeDate,
         latitude: widget.fix?.latitude,
@@ -103,24 +109,24 @@ class _CardScreenState extends State<CardScreen> {
         placeLabel: widget.fix?.label,
         tags: widget.tags,
       );
-      await store.add(entry);
       _saved = true;
-      messenger.showSnackBar(
-        const SnackBar(content: Text('saved to your timeline')),
-      );
-      // Back to the timeline. Without this the user is left on a saved card
-      // whose back button returns to a compose screen still holding the photo
-      // and text — tapping through again silently saves a duplicate.
-      navigator.popUntil((route) => route.isFirst);
     } catch (e) {
-      // The photo was copied before the record failed; nothing references it.
-      if (storedName != null) await EntryStore.discardPhoto(storedName);
       messenger.showSnackBar(
         const SnackBar(content: Text("couldn't save — please try again")),
       );
-    } finally {
       if (mounted) setState(() => _busy = false);
+      return;
     }
+    // On success _busy deliberately stays true: this screen is about to pop,
+    // and re-enabling the row first flashes a one-frame button re-layout.
+
+    messenger.showSnackBar(
+      const SnackBar(content: Text('saved to your timeline')),
+    );
+    // Back to the timeline. Without this the user is left on a saved card
+    // whose back button returns to a compose screen still holding the photo
+    // and text — tapping through again silently saves a duplicate.
+    navigator.popUntil((route) => route.isFirst);
   }
 
   Future<void> _share() async {

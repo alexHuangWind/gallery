@@ -3,7 +3,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:intl/intl.dart' show DateFormat;
 import 'package:palette_generator/palette_generator.dart';
 
 import '../theme.dart';
@@ -46,6 +45,26 @@ class PreferenceCard extends StatefulWidget {
 }
 
 class _PreferenceCardState extends State<PreferenceCard> {
+  /// What actually gets decoded and painted.
+  ///
+  /// Compact cards (grid tiles) cap the decode at 600 px wide — a 2-column
+  /// tile paints ~192 logical pt, so 600 covers a 3x display exactly. A
+  /// 2000 px photo
+  /// otherwise decodes to ~20 MB of RGBA *per tile*, blowing through the image
+  /// cache after a handful of entries and re-decoding on every scroll. The
+  /// SAME resized provider must feed the palette call below — its `size:`
+  /// parameter scales the paint, not the decode, so passing the raw provider
+  /// there would do the full decode this exists to avoid. The full-size card
+  /// (and therefore the export boundary) keeps the raw provider untouched.
+  ///
+  /// Derived per use rather than stored: [didUpdateWidget] compares the *base*
+  /// provider (FileImage has value equality; an inline ResizeImage does not),
+  /// and the image cache keys on ResizeImage's equatable key, so re-creating
+  /// the wrapper never causes a second decode.
+  ImageProvider get _paintImage => widget.compact
+      ? ResizeImage(widget.image, width: 600)
+      : widget.image;
+
   /// Dark tone sampled from the bottom of the photo (value dropped in HSV).
   Color _scrim = const Color(0xCC101010);
 
@@ -75,7 +94,7 @@ class _PreferenceCardState extends State<PreferenceCard> {
       // the bottom third of a small 9:16 proxy — where the text will sit.
       const size = Size(120, 213);
       final palette = await PaletteGenerator.fromImageProvider(
-        widget.image,
+        _paintImage,
         size: size,
         region: const Rect.fromLTRB(0, 142, 120, 213),
         maximumColorCount: 8,
@@ -111,10 +130,10 @@ class _PreferenceCardState extends State<PreferenceCard> {
             // widget that gets exported, and a missing file would otherwise
             // throw on every rebuild instead of degrading to a placeholder.
             Image(
-              image: widget.image,
+              image: _paintImage,
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => const ColoredBox(
-                color: Color(0xFFEDEAE3),
+                color: AppTheme.placeholder,
                 child: Center(
                   child: Icon(Icons.image_not_supported_outlined,
                       size: 26, color: AppTheme.muted),
@@ -178,7 +197,7 @@ class _Lockup extends StatelessWidget {
   final bool compact;
 
   String _stamp() {
-    final date = DateFormat('MMM d, yyyy').format(createdAt).toLowerCase();
+    final date = quietDate(createdAt);
     final place = placeLabel?.trim();
     if (place == null || place.isEmpty) return date;
     return '$date · $place';

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart' show DateFormat;
 import 'package:provider/provider.dart';
 
 import '../data/entry_store.dart';
@@ -20,7 +19,7 @@ import '../theme.dart';
 class NearbyRecall extends StatefulWidget {
   const NearbyRecall({
     super.key,
-    this.radiusMetres = 200,
+    this.radiusMetres = kRecallRadiusMetres,
     this.tags = const {},
   });
 
@@ -152,14 +151,16 @@ class _RecallChip extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: Image.file(
-                EntryStore.fileFor(entry),
+                context.read<EntryStore>().fileFor(entry),
                 width: 64,
                 height: 114,
                 fit: BoxFit.cover,
+                // The chip paints at 64 pt; cap the decode near 3x that.
+                cacheWidth: 200,
                 errorBuilder: (_, __, ___) => Container(
                   width: 64,
                   height: 114,
-                  color: const Color(0xFFEDEAE3),
+                  color: AppTheme.placeholder,
                 ),
               ),
             ),
@@ -181,7 +182,7 @@ class _RecallChip extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    DateFormat('MMM d, yyyy').format(entry.createdAt).toLowerCase(),
+                    quietDate(entry.createdAt),
                     style: const TextStyle(fontSize: 10, color: AppTheme.muted),
                   ),
                 ],

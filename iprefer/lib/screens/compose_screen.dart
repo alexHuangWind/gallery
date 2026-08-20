@@ -310,7 +310,7 @@ class _PhotoWell extends StatelessWidget {
         onTap: () => _choose(context),
         child: Container(
           decoration: BoxDecoration(
-            color: const Color(0xFFEDEAE3),
+            color: AppTheme.placeholder,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppTheme.muted.withValues(alpha: 0.3)),
           ),

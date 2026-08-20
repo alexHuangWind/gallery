@@ -94,7 +94,17 @@ class _ArchiveTile extends StatelessWidget {
       ),
     );
     if (ok == true && context.mounted) {
-      await context.read<EntryStore>().delete(entry.id);
+      final store = context.read<EntryStore>();
+      final messenger = ScaffoldMessenger.of(context);
+      try {
+        await store.delete(entry.id);
+      } catch (_) {
+        // A failed box write would otherwise vanish into an unhandled async
+        // error while the tile silently stays — say so, plainly.
+        messenger.showSnackBar(
+          const SnackBar(content: Text("couldn't remove — try again")),
+        );
+      }
     }
   }
 
@@ -104,7 +114,7 @@ class _ArchiveTile extends StatelessWidget {
       onTap: () => _open(context),
       onLongPress: () => _confirmDelete(context),
       child: PreferenceCard(
-        image: FileImage(EntryStore.fileFor(entry)),
+        image: FileImage(context.read<EntryStore>().fileFor(entry)),
         text: entry.text,
         createdAt: entry.createdAt,
         placeLabel: entry.placeLabel,

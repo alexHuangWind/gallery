@@ -141,8 +141,15 @@ abstract final class LocationService {
   static Future<String?> describe(double latitude, double longitude) async {
     try {
       // geocoding 5.x moved the top-level functions onto a Geocoding instance.
-      final marks =
-          await geo.Geocoding().placemarkFromCoordinates(latitude, longitude);
+      //
+      // Bounded because the platform geocoders (CLGeocoder, android Geocoder)
+      // can block indefinitely on a flaky network, and this call sits inside
+      // current()/passive() whose callers latch on the awaited future — an
+      // unbounded hang here froze "nearest" until app restart. The service's
+      // contract is value-or-null; the timeout lands in the catch below.
+      final marks = await geo.Geocoding()
+          .placemarkFromCoordinates(latitude, longitude)
+          .timeout(const Duration(seconds: 5));
       if (marks.isEmpty) return null;
       final m = marks.first;
       final candidates = <String?>[

@@ -59,10 +59,26 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     setState(() => _me = LatLng(fix.latitude, fix.longitude));
   }
 
+  /// One camera-fit policy, referenced by both the initial [MapOptions] and
+  /// every later re-fit — change these in one place or the first frame
+  /// disagrees with every subsequent filter change.
+  static const double _singlePointZoom = 15;
+  static CameraFit _boundsFit(List<LatLng> points) => CameraFit.bounds(
+        bounds: LatLngBounds.fromPoints(points),
+        padding: const EdgeInsets.all(64),
+        maxZoom: 16,
+      );
+
   /// Moves the camera when the pin set actually changes.
   ///
   /// `initialCameraFit` applies once at construction, so filtering down to a
   /// different city would otherwise leave the user staring at empty ocean.
+  ///
+  /// Called from build on purpose, and safe there: it is idempotent per pin
+  /// signature (`_fittedSignature` is a plain field, not a notifier), and the
+  /// actual camera move is deferred to after the frame. Don't "fix" the
+  /// build-time call by moving it into a lifecycle hook — the pin set is
+  /// derived from providers only available at build time.
   void _fitTo(List<LatLng> points) {
     final signature = points.map((p) => '${p.latitude},${p.longitude}').join(';');
     if (signature == _fittedSignature) return;
@@ -71,15 +87,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || points.isEmpty) return;
       if (points.length == 1) {
-        _controller.move(points.first, 15);
+        _controller.move(points.first, _singlePointZoom);
       } else {
-        _controller.fitCamera(
-          CameraFit.bounds(
-            bounds: LatLngBounds.fromPoints(points),
-            padding: const EdgeInsets.all(64),
-            maxZoom: 16,
-          ),
-        );
+        _controller.fitCamera(_boundsFit(points));
       }
     });
   }
@@ -118,13 +128,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   // instead of asking the camera to fit a zero-area box.
                   initialCenter:
                       points.length == 1 ? points.first : const LatLng(0, 0),
-                  initialZoom: points.length == 1 ? 15 : 2,
+                  initialZoom:
+                      points.length == 1 ? _MapScreenState._singlePointZoom : 2,
                   initialCameraFit: points.length > 1
-                      ? CameraFit.bounds(
-                          bounds: LatLngBounds.fromPoints(points),
-                          padding: const EdgeInsets.all(64),
-                          maxZoom: 16,
-                        )
+                      ? _MapScreenState._boundsFit(points)
                       : null,
                 ),
                 children: [
@@ -212,8 +219,10 @@ class _EntryPin extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: Image.file(
-          EntryStore.fileFor(entry),
+          context.read<EntryStore>().fileFor(entry),
           fit: BoxFit.cover,
+          // The pin is 54 pt; decoding beyond ~3x that is pure memory waste.
+          cacheWidth: 162,
           errorBuilder: (_, __, ___) => Container(color: AppTheme.muted),
         ),
       ),

@@ -35,6 +35,11 @@ class _HomeShellState extends State<HomeShell> {
             tooltip: 'sign out',
             icon: const Icon(Icons.logout, size: 20),
             onPressed: () {
+              // Reset BEFORE signOut: the next user must not inherit this
+              // one's filter, sort, or last known coordinates. This is the
+              // only sign-out path today; if Firebase ever adds another
+              // (expiry, revocation), move this pairing into main.dart's
+              // composition root next to the store→prune listener.
               context.read<ArchiveView>().reset();
               context.read<Session>().signOut();
             },
