@@ -140,7 +140,9 @@ abstract final class LocationService {
   /// beats a city, which is too coarse to mean anything on a card.
   static Future<String?> describe(double latitude, double longitude) async {
     try {
-      final marks = await geo.placemarkFromCoordinates(latitude, longitude);
+      // geocoding 5.x moved the top-level functions onto a Geocoding instance.
+      final marks =
+          await geo.Geocoding().placemarkFromCoordinates(latitude, longitude);
       if (marks.isEmpty) return null;
       final m = marks.first;
       final candidates = <String?>[
