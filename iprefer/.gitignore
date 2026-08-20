@@ -27,6 +27,7 @@ ios/Flutter/Flutter.podspec
 ios/Flutter/Generated.xcconfig
 ios/Flutter/flutter_export_environment.sh
 ios/Podfile.lock
+ios/Flutter/ephemeral/
 **/*.xcworkspace/xcuserdata/
 **/*.xcodeproj/xcuserdata/
 

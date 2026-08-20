@@ -49,20 +49,33 @@ set_string NSPhotoLibraryUsageDescription \
 set_string NSPhotoLibraryAddUsageDescription \
   "Saves your finished card to your photos."
 
-echo "==> pinning the iOS deployment target"
-# geolocator 13 and flutter_map need 12.0 or newer.
-if [[ -f ios/Podfile ]]; then
-  if grep -q "^platform :ios" ios/Podfile; then
-    sed -i '' "s/^platform :ios.*/platform :ios, '12.0'/" ios/Podfile
-  else
-    printf "platform :ios, '12.0'\n%s" "$(cat ios/Podfile)" > ios/Podfile
-  fi
-  echo "    ios/Podfile -> 12.0"
-fi
-
-echo "==> installing pods"
+echo "==> generating plugin wiring"
+# On a Flutter with Swift Package Manager enabled (3.44+ default) this writes
+# ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage and there
+# is no Podfile at all. On an older CocoaPods-mode Flutter it writes the
+# Podfile instead — handled below.
 flutter pub get
-(cd ios && pod install)
+flutter build ios --config-only --no-codesign
+
+if [[ -f ios/Podfile ]]; then
+  echo "==> pinning the iOS deployment target (CocoaPods mode)"
+  # 13.0 is Flutter's own minimum (3.44 era); geolocator and flutter_map
+  # need 12.0 or newer, so the Flutter floor satisfies them too.
+  if grep -q "^platform :ios" ios/Podfile; then
+    sed -i '' "s/^platform :ios.*/platform :ios, '13.0'/" ios/Podfile
+  elif grep -q "^# platform :ios" ios/Podfile; then
+    sed -i '' "s/^# platform :ios.*/platform :ios, '13.0'/" ios/Podfile
+  else
+    printf "platform :ios, '13.0'\n%s" "$(cat ios/Podfile)" > ios/Podfile
+  fi
+  echo "    ios/Podfile -> 13.0"
+
+  echo "==> installing pods"
+  # CocoaPods crashes outright in a non-UTF-8 shell (Encoding::CompatibilityError).
+  (cd ios && LANG=en_US.UTF-8 pod install)
+else
+  echo "==> no Podfile: plugins are wired through Swift Package Manager; nothing to pin or install"
+fi
 
 echo
 echo "done. now run:  flutter run -d ios"
