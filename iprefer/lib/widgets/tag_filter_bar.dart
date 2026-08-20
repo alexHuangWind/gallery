@@ -79,7 +79,7 @@ class _Chip extends StatelessWidget {
             color: selected ? AppTheme.ink : Colors.transparent,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: selected ? AppTheme.ink : AppTheme.muted.withOpacity(0.35),
+              color: selected ? AppTheme.ink : AppTheme.muted.withValues(alpha: 0.35),
             ),
           ),
           child: Text(

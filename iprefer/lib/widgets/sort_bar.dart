@@ -58,14 +58,14 @@ class _NearestStatus extends StatelessWidget {
     const style = TextStyle(color: AppTheme.muted, fontSize: 11);
 
     if (view.locating) {
-      return Row(
+      return const Row(
         children: [
-          const SizedBox(
+          SizedBox(
             width: 11,
             height: 11,
             child: CircularProgressIndicator(strokeWidth: 1.4),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           Flexible(child: Text('finding you', style: style)),
         ],
       );
@@ -74,7 +74,7 @@ class _NearestStatus extends StatelessWidget {
     if (view.originUnavailable) {
       return Row(
         children: [
-          Flexible(
+          const Flexible(
             child: Text('needs your location',
                 style: style, overflow: TextOverflow.ellipsis),
           ),
@@ -123,7 +123,7 @@ class _Option extends StatelessWidget {
           color: selected ? AppTheme.ink : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? AppTheme.ink : AppTheme.muted.withOpacity(0.35),
+            color: selected ? AppTheme.ink : AppTheme.muted.withValues(alpha: 0.35),
           ),
         ),
         child: Text(

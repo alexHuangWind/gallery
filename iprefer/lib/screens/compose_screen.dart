@@ -135,7 +135,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                       fontFamily: AppTheme.serif,
                       fontStyle: FontStyle.italic,
                       fontSize: 22,
-                      color: AppTheme.ink.withOpacity(0.85),
+                      color: AppTheme.ink.withValues(alpha: 0.85),
                     ),
                   ),
                 ],
@@ -192,14 +192,14 @@ class _PlaceRow extends StatelessWidget {
 
     switch (state) {
       case _FixState.locating:
-        return Row(
+        return const Row(
           children: [
-            const SizedBox(
+            SizedBox(
               width: 13,
               height: 13,
               child: CircularProgressIndicator(strokeWidth: 1.6),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Text('finding where you are', style: muted),
           ],
         );
@@ -230,7 +230,7 @@ class _PlaceRow extends StatelessWidget {
           children: [
             const Icon(Icons.place_outlined, size: 16, color: AppTheme.muted),
             const SizedBox(width: 6),
-            Text('no place on this one', style: muted),
+            const Text('no place on this one', style: muted),
             const Spacer(),
             TextButton(
               onPressed: onRetry,
@@ -249,7 +249,7 @@ class _PlaceRow extends StatelessWidget {
           children: [
             const Icon(Icons.place_outlined, size: 16, color: AppTheme.muted),
             const SizedBox(width: 6),
-            Expanded(child: Text("couldn't get your location", style: muted)),
+            const Expanded(child: Text("couldn't get your location", style: muted)),
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(
@@ -312,7 +312,7 @@ class _PhotoWell extends StatelessWidget {
           decoration: BoxDecoration(
             color: const Color(0xFFEDEAE3),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.muted.withOpacity(0.3)),
+            border: Border.all(color: AppTheme.muted.withValues(alpha: 0.3)),
           ),
           clipBehavior: Clip.antiAlias,
           child: photo == null

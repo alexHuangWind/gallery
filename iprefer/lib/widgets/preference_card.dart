@@ -92,7 +92,7 @@ class _PreferenceCardState extends State<PreferenceCard> {
           .withSaturation((hsv.saturation * 0.7).clamp(0.0, 0.6))
           .toColor();
       if (!mounted || request != _scrimRequest) return; // a newer photo won
-      setState(() => _scrim = scrim.withOpacity(0.92));
+      setState(() => _scrim = scrim.withValues(alpha: 0.92));
     } catch (_) {
       // Keep the neutral fallback scrim; a failed sample must not break the card.
     }
@@ -132,7 +132,7 @@ class _PreferenceCardState extends State<PreferenceCard> {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [_scrim.withOpacity(0), _scrim],
+                      colors: [_scrim.withValues(alpha: 0), _scrim],
                       stops: const [0.0, 0.85],
                     ),
                   ),
@@ -187,7 +187,7 @@ class _Lockup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shadows = <Shadow>[
-      Shadow(color: Colors.black.withOpacity(0.45), blurRadius: 8, offset: const Offset(0, 1)),
+      Shadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 8, offset: const Offset(0, 1)),
     ];
 
     return Column(
@@ -201,7 +201,7 @@ class _Lockup extends StatelessWidget {
             fontFamily: AppTheme.serif,
             fontStyle: FontStyle.italic,
             fontSize: compact ? 13 : 19,
-            color: Colors.white.withOpacity(0.8),
+            color: Colors.white.withValues(alpha: 0.8),
             shadows: shadows,
           ),
         ),
@@ -234,7 +234,7 @@ class _Lockup extends StatelessWidget {
                 style: TextStyle(
                   fontSize: compact ? 9 : 11,
                   letterSpacing: 0.4,
-                  color: Colors.white.withOpacity(0.7),
+                  color: Colors.white.withValues(alpha: 0.7),
                   shadows: shadows,
                 ),
               ),
@@ -247,7 +247,7 @@ class _Lockup extends StatelessWidget {
                 fontFamily: AppTheme.serif,
                 fontStyle: FontStyle.italic,
                 fontSize: compact ? 9 : 12,
-                color: Colors.white.withOpacity(0.45),
+                color: Colors.white.withValues(alpha: 0.45),
               ),
             ),
           ],

@@ -34,7 +34,7 @@ class AppTheme {
           color: ink,
         ),
         bodyLarge: const TextStyle(fontSize: 16, color: ink, height: 1.4),
-        bodyMedium: TextStyle(fontSize: 14, color: ink.withOpacity(0.8)),
+        bodyMedium: TextStyle(fontSize: 14, color: ink.withValues(alpha: 0.8)),
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: paper,

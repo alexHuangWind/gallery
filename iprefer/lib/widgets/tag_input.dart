@@ -174,7 +174,7 @@ class _Chip extends StatelessWidget {
           border: Border.all(
             color: selected
                 ? AppTheme.ink
-                : AppTheme.muted.withOpacity(dashed ? 0.5 : 0.35),
+                : AppTheme.muted.withValues(alpha: dashed ? 0.5 : 0.35),
           ),
         ),
         child: Row(

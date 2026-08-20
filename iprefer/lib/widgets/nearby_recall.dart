@@ -105,7 +105,7 @@ class _NearbyRecallState extends State<NearbyRecall>
                     fontFamily: AppTheme.serif,
                     fontStyle: FontStyle.italic,
                     fontSize: 16,
-                    color: AppTheme.ink.withOpacity(0.9),
+                    color: AppTheme.ink.withValues(alpha: 0.9),
                   ),
                 ),
               ),

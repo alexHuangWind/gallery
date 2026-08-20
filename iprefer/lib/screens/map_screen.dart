@@ -167,7 +167,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 bottom: 6,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.75),
+                    color: Colors.white.withValues(alpha: 0.75),
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: const Padding(
@@ -204,7 +204,7 @@ class _EntryPin extends StatelessWidget {
           border: Border.all(color: Colors.white, width: 2.5),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withValues(alpha: 0.3),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),
@@ -232,7 +232,7 @@ class _YouAreHereDot extends StatelessWidget {
         color: const Color(0xFF3B7DD8),
         border: Border.all(color: Colors.white, width: 2.5),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 4),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 4),
         ],
       ),
     );

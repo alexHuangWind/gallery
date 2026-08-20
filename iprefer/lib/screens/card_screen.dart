@@ -188,7 +188,7 @@ class _CardScreenState extends State<CardScreen> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: AppTheme.muted.withOpacity(0.35),
+                            color: AppTheme.muted.withValues(alpha: 0.35),
                           ),
                         ),
                         child: Text(
