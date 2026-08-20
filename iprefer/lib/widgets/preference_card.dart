@@ -225,10 +225,13 @@ class _Lockup extends StatelessWidget {
           ),
         ),
         SizedBox(height: compact ? 2 : 6),
-        // The user's words: larger serif white.
+        // The user's words: larger serif white. Compact tiles cap at 2 lines:
+        // the lockup grows upward from the bottom, so a third line eats
+        // visibly more photo on some tiles than others and breaks the grid's
+        // rhythm. Tapping opens the full card; nothing is lost.
         Text(
           text,
-          maxLines: compact ? 3 : 6,
+          maxLines: compact ? 2 : 6,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontFamily: AppTheme.serif,

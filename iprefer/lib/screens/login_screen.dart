@@ -20,10 +20,13 @@ class LoginScreen extends StatelessWidget {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(36),
+          // Deliberately top-and-bottom: the lockup opens the page like a
+          // title page, the action stays at the thumb. (No mainAxisAlignment —
+          // it fought the Spacer and lost, leaving the lockup adrift.)
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const SizedBox(height: 48),
               const Text(
                 'I prefer',
                 style: TextStyle(
@@ -36,7 +39,8 @@ class LoginScreen extends StatelessWidget {
               const SizedBox(height: 16),
               const Text(
                 'a quiet record of the things you like.\none photo, one line, at a time.',
-                style: TextStyle(color: AppTheme.muted, fontSize: 16, height: 1.5),
+                style: TextStyle(
+                    color: AppTheme.mutedText, fontSize: 16, height: 1.5),
               ),
               const Spacer(),
               SizedBox(

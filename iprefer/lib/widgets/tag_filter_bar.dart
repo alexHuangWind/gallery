@@ -44,7 +44,8 @@ class TagFilterBar extends StatelessWidget {
           ],
           for (final tag in tags) ...[
             _Chip(
-              label: '$tag  ${counts[tag]}',
+              label: tag,
+              count: counts[tag],
               selected: active.contains(tag),
               onTap: () => context.read<ArchiveView>().toggle(tag),
             ),
@@ -61,14 +62,23 @@ class _Chip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.count,
   });
 
   final String label;
+
+  /// How many entries carry the tag. Rendered smaller and quieter than the
+  /// name so a long tag next to a two-digit number still reads as
+  /// "name, count" rather than one run-on token.
+  final int? count;
+
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final fg = selected ? AppTheme.paper : AppTheme.ink;
+
     return Center(
       child: InkWell(
         onTap: onTap,
@@ -82,11 +92,20 @@ class _Chip extends StatelessWidget {
               color: selected ? AppTheme.ink : AppTheme.muted.withValues(alpha: 0.35),
             ),
           ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              color: selected ? AppTheme.paper : AppTheme.ink,
+          child: Text.rich(
+            TextSpan(
+              text: label,
+              style: TextStyle(fontSize: 13, color: fg),
+              children: [
+                if (count != null)
+                  TextSpan(
+                    text: '  $count',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: fg.withValues(alpha: 0.6),
+                    ),
+                  ),
+              ],
             ),
           ),
         ),

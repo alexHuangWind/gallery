@@ -89,7 +89,12 @@ class _ArchiveTile extends StatelessWidget {
         content: const Text('this entry leaves your timeline for good.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('keep')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('remove')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            // The only irreversible choice in the app gets the only red.
+            style: TextButton.styleFrom(foregroundColor: AppTheme.danger),
+            child: const Text('remove'),
+          ),
         ],
       ),
     );
@@ -110,15 +115,25 @@ class _ArchiveTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _open(context),
-      onLongPress: () => _confirmDelete(context),
-      child: PreferenceCard(
-        image: FileImage(context.read<EntryStore>().fileFor(entry)),
-        text: entry.text,
-        createdAt: entry.createdAt,
-        placeLabel: entry.placeLabel,
-        compact: true,
+    // InkWell rather than a bare GestureDetector so both the tap and the
+    // long-press visibly register before anything happens. The splash is
+    // explicit muted ink — the default ripple resolves from the seed-derived
+    // primary, which is exactly the stray color the theme keeps out.
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        splashColor: AppTheme.ink.withValues(alpha: 0.06),
+        highlightColor: AppTheme.ink.withValues(alpha: 0.04),
+        onTap: () => _open(context),
+        onLongPress: () => _confirmDelete(context),
+        child: PreferenceCard(
+          image: FileImage(context.read<EntryStore>().fileFor(entry)),
+          text: entry.text,
+          createdAt: entry.createdAt,
+          placeLabel: entry.placeLabel,
+          compact: true,
+        ),
       ),
     );
   }
@@ -150,7 +165,7 @@ class _EmptyState extends StatelessWidget {
             const Text(
               'photograph one small thing you like.\nstart the record.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.muted, height: 1.5),
+              style: TextStyle(color: AppTheme.mutedText, height: 1.5),
             ),
             const SizedBox(height: 24),
             FilledButton(onPressed: onStart, child: const Text('record the first one')),

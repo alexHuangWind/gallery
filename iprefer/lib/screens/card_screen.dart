@@ -214,7 +214,27 @@ class _CardScreenState extends State<CardScreen> {
                     Expanded(
                       child: FilledButton(
                         onPressed: _busy ? null : _save,
-                        child: const Text('save'),
+                        // The habit's payoff moment must visibly respond: the
+                        // copy+write takes real time, and a silently disabled
+                        // button reads as a dead tap. Height matches the plain
+                        // label, so nothing reflows.
+                        child: _busy
+                            ? const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 1.6,
+                                        color: AppTheme.paper),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text('saving'),
+                                ],
+                              )
+                            : const Text('save'),
                       ),
                     ),
                     const SizedBox(width: 12),

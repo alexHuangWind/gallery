@@ -82,8 +82,9 @@ class _NearestStatus extends StatelessWidget {
             onPressed: () => context.read<ArchiveView>().refreshOrigin(),
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              // Small label, honest hit area — this is the recovery control
+              // after a denied location; shrinkWrap made it a precision tap.
+              minimumSize: const Size(48, 40),
             ),
             child: const Text('try again', style: TextStyle(fontSize: 11)),
           ),

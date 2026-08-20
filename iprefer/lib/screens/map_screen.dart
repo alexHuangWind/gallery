@@ -279,7 +279,7 @@ class _MapEmptyState extends StatelessWidget {
                   ? 'no tagged entries have a place yet.'
                   : 'record something while you are out,\nand it will land here.',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.muted, height: 1.5),
+              style: const TextStyle(color: AppTheme.mutedText, height: 1.5),
             ),
           ],
         ),

@@ -32,6 +32,11 @@ class _ComposeScreenState extends State<ComposeScreen> {
   /// land instead of silently saving a placeless entry.
   Future<void>? _locating;
 
+  /// Guards the up-to-2s wait in [_makeCard]: without it a double-tap pushes
+  /// two card screens — and because the fix can land between the taps, the
+  /// two cards can even disagree about the place.
+  bool _makingCard = false;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -83,23 +88,29 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
   Future<void> _makeCard() async {
     final text = _controller.text.trim();
-    if (_photo == null || text.isEmpty) return;
+    if (_photo == null || text.isEmpty || _makingCard) return;
+    setState(() => _makingCard = true);
 
-    // A cold GPS plus a reverse geocode can outlast a fast typist. Without this
-    // the entry is written placeless — no pin, no recall, invisible to
-    // "nearest" — while the fix lands seconds later on a screen already left.
-    // Bounded, because location must never block recording.
-    if (_fixState == _FixState.locating && _locating != null) {
-      await _locating!.timeout(const Duration(seconds: 2), onTimeout: () {});
+    try {
+      // A cold GPS plus a reverse geocode can outlast a fast typist. Without
+      // this the entry is written placeless — no pin, no recall, invisible to
+      // "nearest" — while the fix lands seconds later on a screen already
+      // left. Bounded, because location must never block recording.
+      if (_fixState == _FixState.locating && _locating != null) {
+        await _locating!.timeout(const Duration(seconds: 2), onTimeout: () {});
+      }
+      if (!mounted) return;
+
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              CardScreen(photo: _photo!, text: text, fix: _fix, tags: _tags),
+        ),
+      );
+    } finally {
+      // Re-arms when the card screen pops back to an unfinished compose.
+      if (mounted) setState(() => _makingCard = false);
     }
-    if (!mounted) return;
-
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            CardScreen(photo: _photo!, text: text, fix: _fix, tags: _tags),
-      ),
-    );
   }
 
   @override
@@ -160,8 +171,23 @@ class _ComposeScreenState extends State<ComposeScreen> {
               ),
               const SizedBox(height: 28),
               FilledButton(
-                onPressed: canMake ? _makeCard : null,
-                child: const Text('make card'),
+                onPressed: (canMake && !_makingCard) ? _makeCard : null,
+                child: _makingCard
+                    ? const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 1.6, color: AppTheme.paper),
+                          ),
+                          SizedBox(width: 8),
+                          Text('making your card'),
+                        ],
+                      )
+                    : const Text('make card'),
               ),
             ],
           ),
@@ -217,8 +243,11 @@ class _PlaceRow extends StatelessWidget {
               onPressed: onDrop,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                // Visually small, but the hit area stays a real target: these
+                // buttons are the recovery path right after a location denial,
+                // the worst moment to demand precision. shrinkWrap would
+                // collapse the tappable box to the label.
+                minimumSize: const Size(48, 40),
               ),
               child: const Text('leave it off', style: TextStyle(fontSize: 12)),
             ),
@@ -236,8 +265,11 @@ class _PlaceRow extends StatelessWidget {
               onPressed: onRetry,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                // Visually small, but the hit area stays a real target: these
+                // buttons are the recovery path right after a location denial,
+                // the worst moment to demand precision. shrinkWrap would
+                // collapse the tappable box to the label.
+                minimumSize: const Size(48, 40),
               ),
               child: const Text('add it back', style: TextStyle(fontSize: 12)),
             ),
@@ -254,8 +286,11 @@ class _PlaceRow extends StatelessWidget {
               onPressed: onRetry,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                // Visually small, but the hit area stays a real target: these
+                // buttons are the recovery path right after a location denial,
+                // the worst moment to demand precision. shrinkWrap would
+                // collapse the tappable box to the label.
+                minimumSize: const Size(48, 40),
               ),
               child: const Text('try again', style: TextStyle(fontSize: 12)),
             ),

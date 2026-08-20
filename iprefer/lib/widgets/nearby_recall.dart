@@ -110,7 +110,11 @@ class _NearbyRecallState extends State<NearbyRecall>
               ),
               IconButton(
                 icon: const Icon(Icons.close, size: 16, color: AppTheme.muted),
-                visualDensity: VisualDensity.compact,
+                // 44pt minimum (iOS HIG) — compact density shrank the hit box
+                // of the one control that makes this banner ignorable.
+                constraints:
+                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                padding: EdgeInsets.zero,
                 tooltip: 'dismiss',
                 onPressed: () => setState(() => _dismissed = true),
               ),

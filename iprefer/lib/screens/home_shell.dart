@@ -54,6 +54,9 @@ class _HomeShellState extends State<HomeShell> {
         onPressed: _compose,
         backgroundColor: AppTheme.ink,
         foregroundColor: AppTheme.paper,
+        // 8dp like every real button; the default stadium pill reads as a
+        // chip, and pills mean "selectable filter" everywhere else here.
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         icon: const Icon(Icons.add),
         label: const Text('record'),
       ),
