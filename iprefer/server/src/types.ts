@@ -6,6 +6,10 @@ export interface Env {
   SESSION_SECRET: string;
   /// "1" enables /v1/auth/dev. Absent in production.
   DEV_AUTH?: string;
+  /// Overridable so tests can point at a local JWKS. Defaults to Apple's.
+  APPLE_JWKS_URL?: string;
+  /// The bundle id an identity token must be addressed to. Defaults to ours.
+  APPLE_AUDIENCE?: string;
 }
 
 /// The wire shape of an entry. Mirrors lib/models/entry.dart, except

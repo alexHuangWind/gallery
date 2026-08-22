@@ -14,6 +14,7 @@
 /// response. Re-receiving your own op is harmless: applying `create` for an
 /// entry you already have is a no-op.
 
+import { AppleAuthError, verifyAppleIdentityToken } from './apple';
 import { authenticate, mintToken } from './auth';
 import type { Env, StoredOp } from './types';
 import {
@@ -47,6 +48,9 @@ export default {
       // promise bare would let a rejection escape this try/catch entirely
       // (the try block has already exited by then), turning every
       // ValidationError into a 500.
+      if (path === '/v1/auth/apple' && request.method === 'POST') {
+        return await appleAuth(request, env);
+      }
       if (path === '/v1/auth/dev' && request.method === 'POST') {
         return await devAuth(request, env);
       }
@@ -73,15 +77,47 @@ export default {
       return error(404, 'not found');
     } catch (e) {
       if (e instanceof ValidationError) return error(400, e.message);
+      // A token we won't accept is a 401, and the reason is safe to say: it
+      // tells an honest client what to fix and tells an attacker nothing they
+      // couldn't determine by trying.
+      if (e instanceof AppleAuthError) return error(401, e.message);
       console.error('unhandled', e);
       return error(500, 'internal error');
     }
   },
 } satisfies ExportedHandler<Env>;
 
-/// Dev-only token issuance. Sign in with Apple will be a sibling of this
-/// (`/v1/auth/apple`) that verifies Apple's identity JWT and then mints the
-/// exact same token — the verification path in auth.ts does not change.
+/// Sign in with Apple. Exchanges Apple's identity token for one of ours.
+///
+/// Apple's `sub` is stable per developer account, but it stays internal: our
+/// user id is our own uuid, so nothing downstream is coupled to an identity
+/// provider we might not be the only one of forever.
+async function appleAuth(request: Request, env: Env): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as
+      { identityToken?: unknown } | null;
+
+  const identity = await verifyAppleIdentityToken(env, body?.identityToken);
+
+  // INSERT OR IGNORE against the UNIQUE apple_sub, then read back: two
+  // simultaneous first sign-ins from two devices settle on one user rather
+  // than racing to create two.
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO users (id, apple_sub, created_at) VALUES (?, ?, ?)',
+  )
+    .bind(crypto.randomUUID(), identity.sub, Date.now())
+    .run();
+
+  const row = await env.DB.prepare('SELECT id FROM users WHERE apple_sub = ?')
+    .bind(identity.sub)
+    .first<{ id: string }>();
+  if (!row) return error(500, 'could not resolve the account');
+
+  return json({ token: await mintToken(env, row.id), userId: row.id });
+}
+
+/// Dev-only token issuance: the same token, minted without Apple, for local
+/// work. Guarded by DEV_AUTH, which lives in .dev.vars and is therefore never
+/// deployed.
 async function devAuth(request: Request, env: Env): Promise<Response> {
   if (env.DEV_AUTH !== '1') return error(404, 'not found');
 

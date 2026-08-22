@@ -6,7 +6,7 @@
     "dev": "wrangler dev",
     "db:local": "wrangler d1 execute iprefer-sync --local --file=./schema.sql",
     "typecheck": "tsc --noEmit",
-    "test": "node test/protocol.test.mjs",
+    "test": "node test/protocol.test.mjs && node test/apple_auth.test.mjs",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
