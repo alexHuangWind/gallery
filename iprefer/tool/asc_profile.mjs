@@ -45,13 +45,27 @@ function install(attrs) {
 
 // Reuse an existing valid profile of this name if present.
 const existing = await api(`/v1/profiles?filter[name]=${encodeURIComponent(PROFILE_NAME)}&include=certificates`);
-const active = (existing.data || []).find((p) => p.attributes.profileState === 'ACTIVE');
+const found = existing.data || [];
+const active = found.find((p) => p.attributes.profileState === 'ACTIVE');
 if (active) {
   const full = await api(`/v1/profiles/${active.id}?fields[profiles]=name,uuid,profileContent,profileState`);
   install(full.data.attributes);
   process.stderr.write(`reusing profile ${PROFILE_NAME}\n`);
   process.stdout.write(PROFILE_NAME);
   process.exit(0);
+}
+
+// Nothing usable, but same-named profiles may still exist. Changing an App
+// ID's capabilities (adding Sign in with Apple, say) marks every profile for
+// that App ID INVALID, and Apple rejects a create that duplicates a name — so
+// the stale ones have to go before a fresh one can take their place. This is
+// the recovery path for exactly that, and it is why re-running this script is
+// enough to unbreak the release pipeline after a capability change.
+for (const stale of found) {
+  await api(`/v1/profiles/${stale.id}`, { method: 'DELETE' });
+  process.stderr.write(
+    `removed ${stale.attributes.profileState} profile ${PROFILE_NAME}\n`,
+  );
 }
 
 // Otherwise mint one against the distribution cert + bundle id.
