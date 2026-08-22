@@ -1,0 +1,34 @@
+export interface Env {
+  DB: D1Database;
+  PHOTOS: R2Bucket;
+  /// HMAC key for session tokens. Set with `wrangler secret put SESSION_SECRET`.
+  /// Local dev falls back to a fixed dev value (see index.ts).
+  SESSION_SECRET: string;
+  /// "1" enables /v1/auth/dev. Absent in production.
+  DEV_AUTH?: string;
+}
+
+/// The wire shape of an entry. Mirrors lib/models/entry.dart, except
+/// `localPath` (a device-local file name) travels as `photoName`.
+export interface EntryPayload {
+  id: string;
+  text: string;
+  createdAt: number; // ms since epoch — same precision the client stores
+  latitude: number | null;
+  longitude: number | null;
+  placeLabel: string | null;
+  tags: string[];
+  photoName: string; // "<entryId>.<ext>" — also the R2 object key suffix
+}
+
+export type OpType = 'create' | 'delete';
+
+export interface Op {
+  type: OpType;
+  entryId: string;
+  payload?: EntryPayload | null;
+}
+
+export interface StoredOp extends Op {
+  seq: number;
+}
