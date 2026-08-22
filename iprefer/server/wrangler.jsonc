@@ -11,19 +11,17 @@
     {
       "binding": "DB",
       "database_name": "iprefer-sync",
-      // Filled in by `wrangler d1 create iprefer-sync` before the first deploy.
-      // Local dev (`wrangler dev`) uses a local SQLite file and ignores this.
-      "database_id": "local-dev-placeholder"
+      // Local dev uses a local SQLite file and ignores this.
+      "database_id": "fd9257cd-3a5d-4c5c-8251-a0ca40de7514"
     }
   ],
 
   // Photos. R2 because egress is free — a phone re-downloading its archive
   // after a reinstall is the main traffic this app will ever generate.
-  "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "iprefer-photos" }],
+  "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "iprefer-photos" }]
 
-  "vars": {
-    // Dev-only escape hatch: lets /v1/auth/dev mint a session token without
-    // Apple. MUST stay absent in production — see src/auth.ts.
-    "DEV_AUTH": "1"
-  }
+  // NOTE: DEV_AUTH deliberately lives in .dev.vars, not here.
+  // `wrangler dev` reads that file; `wrangler deploy` never uploads it. So
+  // the open token-minting endpoint (/v1/auth/dev) cannot reach production by
+  // forgetting to unset a var — it is structurally local-only.
 }

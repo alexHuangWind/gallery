@@ -1,4 +1,8 @@
 node_modules/
 .wrangler/
-.dev.vars
 package-lock.json
+
+# .dev.vars IS committed on purpose: it holds only DEV_AUTH=1, which is a
+# local-dev switch rather than a secret, and checking it in keeps
+# `npm run dev` working from a fresh clone. Real secrets go through
+# `wrangler secret put`, never a file.
