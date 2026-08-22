@@ -2,6 +2,12 @@
 
 The sync backend. Cloudflare Workers + D1 (records) + R2 (photos).
 
+**Deployed:** `https://iprefer-sync.alex-apps.workers.dev`
+(D1 `iprefer-sync`, R2 `iprefer-photos`, account alexnz.2046@gmail.com)
+
+Reachable but deliberately unusable until Sign in with Apple lands: the only
+token-minting endpoint is the dev one, and it does not exist in production.
+
 Nothing about the phone changes: it stays the source of truth and never blocks
 on this service. This is the other half — the part that means a reinstall or a
 second device doesn't lose the archive.
@@ -67,9 +73,21 @@ the same `mintToken`. Nothing that guards a request changes.
 production `DEV_AUTH` is absent, so a missing secret is a hard failure rather
 than a quietly insecure default.
 
+## Deploying
+
+```bash
+npx wrangler deploy
+```
+
+Resources already exist; `SESSION_SECRET` is set as a secret. Verified after
+the first deploy: `/v1/health` is 200, `/v1/auth/dev` is **404**, every other
+route without a valid token is **401** — including a token correctly signed
+with the dev fallback secret, which proves production is using the real one.
+
 ## Not done yet
 
-- Sign in with Apple (needs a Services ID + key from the Apple account)
-- Deploy (needs `wrangler d1 create` / `r2 bucket create`, and dropping
-  `DEV_AUTH` + setting a real `SESSION_SECRET`)
-- Wiring the sync service into app startup (needs a deployed URL + a signed-in user)
+- Sign in with Apple. Note `APPLE_ID_AUTH` is not a one-call API enable — it
+  returns 409 "Please select at least one configuration for Sign In with
+  Apple". Enabling it also invalidates the existing provisioning profile, so
+  it needs doing together with a profile rebuild.
+- Wiring the sync service into app startup (needs a signed-in user)
