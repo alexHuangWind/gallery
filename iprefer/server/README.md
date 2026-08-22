@@ -72,4 +72,4 @@ than a quietly insecure default.
 - Sign in with Apple (needs a Services ID + key from the Apple account)
 - Deploy (needs `wrangler d1 create` / `r2 bucket create`, and dropping
   `DEV_AUTH` + setting a real `SESSION_SECRET`)
-- The Flutter client's outbox / tombstones / sync service
+- Wiring the sync service into app startup (needs a deployed URL + a signed-in user)

@@ -66,6 +66,53 @@ class Entry {
     if (!hasLocation) return double.infinity;
     return haversineMetres(latitude!, longitude!, lat, lng);
   }
+
+  /// What the photo is called on the wire, and its key in object storage:
+  /// always `<id>.<ext>`.
+  ///
+  /// [localPath] is normally already exactly this. Records written before the
+  /// name-not-path change hold an absolute path instead, so the name is
+  /// derived from the id rather than read off the path — otherwise those
+  /// entries could never sync, and a stored path would leak a device's
+  /// directory layout to the server.
+  String get syncPhotoName {
+    final slash = localPath.lastIndexOf('/');
+    final base = slash >= 0 ? localPath.substring(slash + 1) : localPath;
+    final dot = base.lastIndexOf('.');
+    final ext = dot > 0 ? base.substring(dot).toLowerCase() : '.jpg';
+    return '$id$ext';
+  }
+
+  /// The wire shape. Mirrors `server/src/types.ts` — keep the two in step.
+  Map<String, Object?> toSyncJson() => {
+        'id': id,
+        'text': text,
+        'createdAt': createdAt.millisecondsSinceEpoch,
+        'latitude': latitude,
+        'longitude': longitude,
+        'placeLabel': placeLabel,
+        'tags': tags,
+        'photoName': syncPhotoName,
+      };
+
+  /// Rebuilds an entry that arrived from the server.
+  ///
+  /// [localPath] becomes the photo *name*: the file may not be on this device
+  /// yet, and the sync service downloads it under exactly that name.
+  static Entry fromSyncJson(Map<String, Object?> json) {
+    final rawTags = json['tags'];
+    return Entry(
+      id: json['id']! as String,
+      localPath: (json['photoName'] as String?) ?? '${json['id']}.jpg',
+      text: (json['text'] as String?) ?? '',
+      createdAt:
+          DateTime.fromMillisecondsSinceEpoch((json['createdAt'] as num).toInt()),
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      placeLabel: json['placeLabel'] as String?,
+      tags: rawTags is List ? rawTags.map((t) => '$t').toList() : const [],
+    );
+  }
 }
 
 /// Entries carrying *any* of [tags] (OR), preserving the incoming order.

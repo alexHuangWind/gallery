@@ -39,6 +39,10 @@ dependencies:
   # Secondary share of the rendered image
   share_plus: ^10.0.2
 
+  # Talking to the sync backend (server/). Optional at runtime: with no
+  # configured endpoint the app behaves exactly as it did before — local only.
+  http: ^1.2.2
+
   # ids
   uuid: ^4.4.2
 

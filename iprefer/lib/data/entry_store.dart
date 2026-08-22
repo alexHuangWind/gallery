@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/entry.dart';
+import 'sync/sync_outbox.dart';
 
 /// How close "you've been here before" considers *here*. One product decision,
 /// one constant: both the store's default and the recall widget's read this,
@@ -17,13 +18,18 @@ const double kRecallRadiusMetres = 200;
 ///
 /// Notifies listeners on every mutation so the timeline rebuilds.
 class EntryStore extends ChangeNotifier {
-  EntryStore._(this._box, this.photosRoot);
+  EntryStore._(this._box, this.photosRoot, this._outbox);
 
   /// Test seam: a store over an already-open box and an existing directory,
   /// skipping the platform channels [open] needs. Production code must keep
   /// going through [open].
   @visibleForTesting
-  EntryStore.forTest(this._box, {required this.photosRoot});
+  EntryStore.forTest(this._box, {required this.photosRoot, SyncOutbox? outbox})
+      : _outbox = outbox;
+
+  /// Where local changes queue up for the server. Null means sync is off, and
+  /// the store behaves exactly as it did before there was a backend.
+  final SyncOutbox? _outbox;
 
   static const String _boxName = 'entries';
 
@@ -36,14 +42,14 @@ class EntryStore extends ChangeNotifier {
   final String photosRoot;
 
   /// Opens Hive and the entries box. Call once during app startup.
-  static Future<EntryStore> open() async {
+  static Future<EntryStore> open({SyncOutbox? outbox}) async {
     await Hive.initFlutter();
     if (!Hive.isAdapterRegistered(1)) {
       Hive.registerAdapter(EntryAdapter());
     }
     final docs = await getApplicationDocumentsDirectory();
     final box = await Hive.openBox<Entry>(_boxName);
-    return EntryStore._(box, p.join(docs.path, 'photos'));
+    return EntryStore._(box, p.join(docs.path, 'photos'), outbox);
   }
 
   /// Resolves an entry's photo to a file.
@@ -169,12 +175,19 @@ class EntryStore extends ChangeNotifier {
       rethrow;
     }
     notifyListeners();
+    // After the record is safely down: the queue is a convenience, and losing
+    // an enqueue costs a delayed backup, never an entry.
+    await _outbox?.enqueueCreate(entry);
     return entry;
   }
 
   Future<void> delete(String id) async {
     final entry = _box.get(id);
+    await _deleteLocally(id, entry);
+    await _outbox?.enqueueDelete(id, photoName: entry?.syncPhotoName);
+  }
 
+  Future<void> _deleteLocally(String id, Entry? entry) async {
     // Record first, photo second. If this is interrupted between the two, an
     // orphaned file is invisible and costs only disk, whereas an orphaned
     // record is a permanently broken tile the app offers no way to repair.
@@ -189,6 +202,43 @@ class EntryStore extends ChangeNotifier {
       } catch (_) {}
     }
     notifyListeners();
+  }
+
+  // --- writes that came FROM the server ------------------------------------
+  //
+  // These deliberately skip the outbox. Routing a pulled op through the
+  // ordinary create/delete would queue it straight back to the server and
+  // bounce it between devices forever.
+
+  Future<void> applyRemoteCreate(Entry entry) async {
+    await _box.put(entry.id, entry);
+    notifyListeners();
+  }
+
+  Future<void> applyRemoteDelete(String id) async {
+    final entry = _box.get(id);
+    if (entry == null) return; // already gone here; nothing to undo
+    await _deleteLocally(id, entry);
+  }
+
+  // --- photo bytes, for the sync service -----------------------------------
+
+  bool hasPhoto(Entry entry) => fileFor(entry).existsSync();
+
+  File _photoByName(String name) => File(p.join(photosRoot, name));
+
+  /// Null when the file isn't there — a delete that raced the upload, or an
+  /// OS reclaim. The caller drops the pending upload rather than retrying.
+  Future<Uint8List?> readPhotoBytes(String name) async {
+    final file = _photoByName(name);
+    if (!file.existsSync()) return null;
+    return file.readAsBytes();
+  }
+
+  Future<void> writePhotoBytes(String name, Uint8List bytes) async {
+    final dir = Directory(photosRoot);
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    await _photoByName(name).writeAsBytes(bytes, flush: true);
   }
 
   /// Copies a picked photo into app-private storage and returns its file name.
