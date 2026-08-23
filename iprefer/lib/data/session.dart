@@ -1,34 +1,73 @@
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:uuid/uuid.dart';
 
-/// Local, stubbed session — no real auth in this pass.
+import 'sync/auth_client.dart';
+import 'sync/sync_config.dart';
+
+/// Performs the native Sign in with Apple prompt and returns Apple's identity
+/// token, or null if the person backed out. A seam, so signing in is testable
+/// without a device or a developer account.
+typedef AppleIdentityTokenProvider = Future<String?> Function();
+
+/// Who is using the app, and whether their archive is backed up.
 ///
-/// "Continue" mints a local user id and stores it in a tiny Hive box. This is
-/// the seam where Firebase / Google sign-in plugs in for v2.
+/// Two ways in, and both are legitimate:
+///  - **guest** — a local id, no account, no server. The app is complete like
+///    this; it is what every existing user already has.
+///  - **Apple** — a real account, which is what makes sync possible.
 ///
-/// TODO(firebase): replace this with FirebaseAuth.
-///   - on sign-in, swap [userId] for the Firebase uid
-///   - migrate existing local entries to the authenticated user
-///   - keep the same `signedIn` / `userId` surface so the UI doesn't change
+/// Signing in is therefore an *upgrade*, never a gate. Nothing in the app
+/// requires an account, in the same spirit as location being an enhancement
+/// rather than a requirement.
 class Session extends ChangeNotifier {
-  Session._(this._box);
+  Session._(this._box, this._appleToken, this._auth);
+
+  @visibleForTesting
+  Session.forTest(
+    this._box, {
+    required AppleIdentityTokenProvider appleToken,
+    required AuthClient auth,
+  })  : _appleToken = appleToken,
+        _auth = auth;
 
   static const String _boxName = 'session';
   static const String _userIdKey = 'userId';
+  static const String _tokenKey = 'syncToken';
 
   final Box _box;
+  final AppleIdentityTokenProvider _appleToken;
+  final AuthClient _auth;
 
-  static Future<Session> open() async {
+  static Future<Session> open({
+    AppleIdentityTokenProvider? appleToken,
+    AuthClient? auth,
+  }) async {
     final box = await Hive.openBox(_boxName);
-    return Session._(box);
+    return Session._(
+      box,
+      appleToken ?? _nativeAppleToken,
+      auth ?? HttpAuthClient(baseUrl: kSyncBaseUrl),
+    );
   }
 
   bool get signedIn => _box.get(_userIdKey) != null;
 
   String? get userId => _box.get(_userIdKey) as String?;
 
-  /// Stub "login": mint a local id and remember it. No network, no password.
+  /// Bearer token for the sync backend. Null for a guest, which is exactly
+  /// what makes a guest local-only: no token, nothing to sync with.
+  String? get syncToken => _box.get(_tokenKey) as String?;
+
+  bool get syncEnabled => syncToken != null;
+
+  /// True when this account could be backed up but isn't — the one state
+  /// worth nudging about.
+  bool get canEnableSync => syncConfigured && !syncEnabled;
+
+  /// Local id, no account, no network. Unchanged from before there was a
+  /// backend, and still the default way in.
   Future<void> continueAsGuest() async {
     if (_box.get(_userIdKey) == null) {
       await _box.put(_userIdKey, 'local-${const Uuid().v4()}');
@@ -36,8 +75,45 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Signs in with Apple and stores the resulting session.
+  ///
+  /// Returns false when the person simply cancelled — that is not an error
+  /// and should not raise anything at the UI. Genuine failures throw
+  /// [AuthException] with something plain to show.
+  Future<bool> signInWithApple() async {
+    final identityToken = await _appleToken();
+    if (identityToken == null) return false; // cancelled
+
+    final session = await _auth.exchangeAppleToken(identityToken);
+    await _box.put(_userIdKey, session.userId);
+    await _box.put(_tokenKey, session.token);
+    notifyListeners();
+    return true;
+  }
+
   Future<void> signOut() async {
     await _box.delete(_userIdKey);
+    await _box.delete(_tokenKey);
     notifyListeners();
+  }
+
+  /// The real prompt. Kept out of [signInWithApple] so the flow around it can
+  /// be tested; this part can only be exercised on a device.
+  static Future<String?> _nativeAppleToken() async {
+    try {
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: const [
+          // Name and email are requested but never required: the app shows
+          // neither. Apple only supplies them on the very first sign-in, and
+          // nothing here depends on having them.
+          AppleIDAuthorizationScopes.email,
+        ],
+      );
+      return credential.identityToken;
+    } on SignInWithAppleAuthorizationException catch (e) {
+      // Cancelled is a choice, not a failure.
+      if (e.code == AuthorizationErrorCode.canceled) return null;
+      throw AuthException("apple couldn't complete that sign-in");
+    }
   }
 }

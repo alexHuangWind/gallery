@@ -191,6 +191,53 @@ void main() {
     });
   });
 
+  group('adopting a guest archive at sign-in', () {
+    test('queues entries recorded before there was an account', () async {
+      // Recorded with no outbox at all — the guest case.
+      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+      await guestStore.create(
+          sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
+      await guestStore.create(
+          sourcePhotoPath: sourcePhoto('b.jpg').path, text: 'two', createdAt: when);
+      expect(outbox.pending, isEmpty);
+
+      await outbox.adoptExisting(guestStore.entries);
+
+      expect(outbox.pending.length, 2);
+      expect(outbox.pendingPhotoUploads.length, 2);
+    });
+
+    test('runs once, so relaunching never re-uploads the archive', () async {
+      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+      final entry = await guestStore.create(
+          sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
+
+      await outbox.adoptExisting(guestStore.entries);
+      await outbox.forget(outbox.pending);
+      await outbox.markPhotoUploaded(entry.syncPhotoName);
+
+      // Every subsequent launch calls this again.
+      await outbox.adoptExisting(guestStore.entries);
+
+      expect(outbox.pending, isEmpty,
+          reason: 'a second adoption would re-push the whole archive');
+      expect(outbox.pendingPhotoUploads, isEmpty,
+          reason: 'and would re-upload every photo, which is the expensive half');
+    });
+
+    test('a reset clears the guard so the next account adopts afresh', () async {
+      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+      await guestStore.create(
+          sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
+      await outbox.adoptExisting(guestStore.entries);
+
+      await outbox.reset();
+      await outbox.adoptExisting(guestStore.entries);
+
+      expect(outbox.pending.length, 1);
+    });
+  });
+
   group('push', () {
     test('sends pending ops and forgets them', () async {
       await record();

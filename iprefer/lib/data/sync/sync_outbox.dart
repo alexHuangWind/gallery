@@ -22,6 +22,7 @@ class SyncOutbox {
   static const String _metaBox = 'sync_meta';
   static const String _photosBox = 'sync_photo_uploads';
   static const String _cursorKey = 'cursor';
+  static const String _adoptedKey = 'adoptedExisting';
 
   final Box _ops;
   final Box _meta;
@@ -67,6 +68,22 @@ class SyncOutbox {
   /// Drops ops the server has accepted.
   Future<void> forget(Iterable<SyncOp> ops) async {
     await _ops.deleteAll([for (final o in ops) o.key]);
+  }
+
+  /// Queues everything recorded before this account existed — a guest's
+  /// archive being adopted when they sign in.
+  ///
+  /// Runs at most once, and that guard is the whole point: without it every
+  /// launch would re-queue every entry and, worse, mark every photo for
+  /// upload again. The server would shrug (creates are idempotent) but the
+  /// phone would spend its upload budget re-sending an archive it already
+  /// sent.
+  Future<void> adoptExisting(Iterable<Entry> entries) async {
+    if (_meta.get(_adoptedKey) == true) return;
+    for (final entry in entries) {
+      await enqueueCreate(entry);
+    }
+    await _meta.put(_adoptedKey, true);
   }
 
   // --- the pull cursor -----------------------------------------------------

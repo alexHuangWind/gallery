@@ -51,7 +51,7 @@ Future<void> main() async {
 
   // A deliberately awkward entry: unicode, an emoji tag, a real fix, and a
   // millisecond timestamp — every field the server validates.
-  final id = '5f2b1c34-9a7e-4d10-b8c6-0e1a2b3c4d5e';
+  const id = '5f2b1c34-9a7e-4d10-b8c6-0e1a2b3c4d5e';
   final entry = Entry(
     id: id,
     localPath: '$id.jpg',
@@ -99,7 +99,7 @@ Future<void> main() async {
   check('a missing photo comes back as null, not an error', absent == null);
 
   // --- delete -------------------------------------------------------------
-  await api.push([SyncOp.delete(id)]);
+  await api.push([const SyncOp.delete(id)]);
   final afterDelete = await api.pull(since: page.seq);
   check('the delete arrives as its own op',
       afterDelete.ops.length == 1 && afterDelete.ops.single.op.type == SyncOpType.delete);

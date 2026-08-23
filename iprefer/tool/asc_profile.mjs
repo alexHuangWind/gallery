@@ -6,7 +6,14 @@
 // Updates` needs the key to have cloud-managed-certificate access, which this
 // team's key does not — so we mint a profile against the existing Apple
 // Distribution certificate and sign manually instead.
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createSign } from 'node:crypto';
 import { homedir } from 'node:os';
 
@@ -37,10 +44,39 @@ const api = async (path, init = {}) => {
   return j;
 };
 
+const PROFILE_DIR = `${homedir()}/Library/MobileDevice/Provisioning Profiles`;
+
+/// Deletes locally-installed profiles that share our name but not our uuid.
+///
+/// Deleting a profile through the API does not remove the copy already on
+/// this Mac, and xcodebuild resolves PROVISIONING_PROFILE_SPECIFIER by *name*.
+/// Leave a stale twin behind and the build may sign against it — which is
+/// exactly how an export failed with "requires a provisioning profile with
+/// the Sign In with Apple feature" while the freshly minted profile had it.
+///
+/// The embedded plist sits in the CMS blob as plaintext, so a regex over the
+/// raw bytes is enough to read Name and UUID without decoding the signature.
+function pruneLocalTwins(keepUuid) {
+  if (!existsSync(PROFILE_DIR)) return;
+  for (const file of readdirSync(PROFILE_DIR)) {
+    if (!file.endsWith('.mobileprovision')) continue;
+    const raw = readFileSync(`${PROFILE_DIR}/${file}`, 'latin1');
+    const name = /<key>Name<\/key>\s*<string>([^<]*)<\/string>/.exec(raw)?.[1];
+    const uuid = /<key>UUID<\/key>\s*<string>([^<]*)<\/string>/.exec(raw)?.[1];
+    if (name === PROFILE_NAME && uuid !== keepUuid) {
+      unlinkSync(`${PROFILE_DIR}/${file}`);
+      process.stderr.write(`removed stale local profile ${uuid}\n`);
+    }
+  }
+}
+
 function install(attrs) {
-  const dir = `${homedir()}/Library/MobileDevice/Provisioning Profiles`;
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(`${dir}/${attrs.uuid}.mobileprovision`, Buffer.from(attrs.profileContent, 'base64'));
+  mkdirSync(PROFILE_DIR, { recursive: true });
+  writeFileSync(
+    `${PROFILE_DIR}/${attrs.uuid}.mobileprovision`,
+    Buffer.from(attrs.profileContent, 'base64'),
+  );
+  pruneLocalTwins(attrs.uuid);
 }
 
 // Reuse an existing valid profile of this name if present.
