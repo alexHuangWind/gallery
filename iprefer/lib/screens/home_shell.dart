@@ -29,7 +29,11 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_tab == 0 ? 'i prefer' : 'places'),
+        // "I prefer" keeps its capital everywhere it appears as the phrase —
+        // it is the app's name and the card's signature line, not body copy.
+        // The lowercase voice applies to what the app *says*, not to what it
+        // is called. ("places" is body copy, so it stays lowercase.)
+        title: Text(_tab == 0 ? 'I prefer' : 'places'),
         actions: [
           IconButton(
             tooltip: 'sign out',

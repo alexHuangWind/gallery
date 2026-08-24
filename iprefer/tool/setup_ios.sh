@@ -26,7 +26,6 @@ fi
 echo "==> generating iOS platform files"
 flutter create --platforms=ios --org com.iprefer --project-name iprefer .
 
-echo "==> adding permission usage strings to Info.plist"
 set_string() {
   local key="$1" value="$2"
   if $PB -c "Print :$key" "$PLIST" >/dev/null 2>&1; then
@@ -36,6 +35,15 @@ set_string() {
   fi
   echo "    $key"
 }
+
+echo "==> setting the name shown under the app icon"
+# flutter create derives this from the project name and produces "Iprefer",
+# which reads as a typo and disagrees with Android's "I prefer". The phrase
+# keeps its capital wherever it is the app's name; the lowercase voice is for
+# what the app says, not what it is called.
+set_string CFBundleDisplayName "I prefer"
+
+echo "==> adding permission usage strings to Info.plist"
 
 # Location. We only ever ask for when-in-use — there is no background tracking.
 set_string NSLocationWhenInUseUsageDescription \
