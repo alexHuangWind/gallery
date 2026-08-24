@@ -109,11 +109,25 @@ class Session extends ChangeNotifier {
           AppleIDAuthorizationScopes.email,
         ],
       );
-      return credential.identityToken;
+      // Apple can return a credential with no identity token in some failure
+      // modes; there is nothing to send the server without one.
+      final token = credential.identityToken;
+      if (token == null || token.isEmpty) {
+        throw AuthException("apple didn't return a sign-in token");
+      }
+      return token;
     } on SignInWithAppleAuthorizationException catch (e) {
       // Cancelled is a choice, not a failure.
       if (e.code == AuthorizationErrorCode.canceled) return null;
-      throw AuthException("apple couldn't complete that sign-in");
+
+      // Carry Apple's own code through. Swallowing it left "Sign-up Not
+      // Completed" on the device with nothing on our side to tell apart a
+      // transient Apple outage from a misconfigured entitlement — the two
+      // need completely different fixes.
+      debugPrint('sign in with apple failed: ${e.code} — ${e.message}');
+      throw AuthException("apple couldn't complete that sign-in (${e.code.name})");
+    } on SignInWithAppleNotSupportedException {
+      throw AuthException('this device cannot sign in with apple');
     }
   }
 }
