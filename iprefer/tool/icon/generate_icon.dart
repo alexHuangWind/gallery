@@ -19,6 +19,11 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// Tuned against the measured ink box printed by this test, not by eye.
+const _glyphScale = 0.82;
+const _dx = -0.0127;
+const _dy = 0.0347;
+
 /// Paper ground rather than ink: the app is paper, and a light tile is also
 /// the one that stands out on a home screen full of dark ones.
 const _paper = Color(0xFFFAF8F4);
@@ -42,7 +47,7 @@ class _AppIcon extends StatelessWidget {
         // and low of its bounding box, and centring the box makes it look
         // like it is sliding off the tile.
         child: Transform.translate(
-          offset: Offset(side * 0.012, -side * 0.02),
+          offset: Offset(side * _dx, side * _dy),
           child: Text(
             'I',
             textDirection: TextDirection.ltr,
@@ -50,7 +55,7 @@ class _AppIcon extends StatelessWidget {
               fontFamily: 'PlayfairDisplay',
               fontStyle: FontStyle.italic,
               fontWeight: FontWeight.w500,
-              fontSize: side * 0.72,
+              fontSize: side * _glyphScale,
               height: 1.0,
               color: _ink,
             ),
@@ -92,12 +97,14 @@ const _androidSizes = <String, int>{
 void main() {
   testWidgets('generate the app icon at every required size', (tester) async {
     // The real typeface, not the test harness's placeholder font.
-    final loader = FontLoader('PlayfairDisplay');
-    loader.addFont(
-      File('assets/fonts/PlayfairDisplay-Italic-Variable.ttf')
-          .readAsBytes()
-          .then((b) => ByteData.view(Uint8List.fromList(b).buffer)),
-    );
+    //
+    // Read synchronously on purpose: testWidgets runs in a fake-async zone,
+    // and awaiting File.readAsBytes() there never completes. Future.value
+    // resolves as a microtask, which fake time does drain.
+    final fontBytes = File('assets/fonts/PlayfairDisplay-Italic-Variable.ttf')
+        .readAsBytesSync();
+    final loader = FontLoader('PlayfairDisplay')
+      ..addFont(Future.value(ByteData.view(fontBytes.buffer)));
     await loader.load();
 
     const side = 1024.0;
@@ -147,6 +154,32 @@ void main() {
         );
       }
     });
+
+    // Measure where the ink actually landed rather than eyeballing it: an
+    // italic glyph's bounding box is not its optical centre, and "looks
+    // roughly centred" is how an icon ends up visibly sliding off its tile.
+    final master = await tester.runAsync(() async {
+      final bytes = File('tool/icon/app_icon.png').readAsBytesSync();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      return frame.image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    });
+    final px = master!.buffer.asUint8List();
+    var minX = 1 << 30, maxX = -1, minY = 1 << 30, maxY = -1;
+    for (var y = 0; y < 1024; y++) {
+      for (var x = 0; x < 1024; x++) {
+        // Any pixel meaningfully darker than paper counts as ink.
+        if (px[(y * 1024 + x) * 4] < 128) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    // ignore: avoid_print
+    print('ink box x[$minX..$maxX] y[$minY..$maxY] '
+        'centre(${(minX + maxX) / 2}, ${(minY + maxY) / 2}) target 512');
 
     expect(File('tool/icon/app_icon.png').existsSync(), isTrue);
     // ignore: avoid_print
