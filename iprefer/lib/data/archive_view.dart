@@ -28,6 +28,7 @@ class ArchiveView extends ChangeNotifier {
   final Future<PlaceFix?> Function({bool prompt}) _getFix;
 
   final Set<String> _selected = <String>{};
+  String _query = '';
   ArchiveSort _sort = ArchiveSort.newest;
 
   PlaceFix? _origin;
@@ -51,6 +52,7 @@ class ArchiveView extends ChangeNotifier {
   /// not inherit the previous one's filter, sort, or last known coordinates.
   void reset() {
     _selected.clear();
+    _query = '';
     _sort = ArchiveSort.newest;
     _origin = null;
     _locating = false;
@@ -103,6 +105,29 @@ class ArchiveView extends ChangeNotifier {
     final keep = available.toSet();
     return _selected.where(keep.contains).toSet();
   }
+
+  // --- search -----------------------------------------------------------
+
+  /// What the archive is being searched for. Empty means no search.
+  ///
+  /// Lives here rather than in the timeline so it narrows the map too: having
+  /// typed "flat white", switching tabs should answer "where do I drink flat
+  /// whites?" — the same reasoning that made tags shared state.
+  String get query => _query;
+
+  /// True once a search is narrowing things — i.e. after non-blank input.
+  ///
+  /// Distinct from "the search field is open": an open, empty field filters
+  /// nothing, so the archive must not claim to be showing search results.
+  bool get isSearching => _query.trim().isNotEmpty;
+
+  void setQuery(String query) {
+    if (_query == query) return;
+    _query = query;
+    _notify();
+  }
+
+  void clearQuery() => setQuery('');
 
   // --- sort -------------------------------------------------------------
 
@@ -157,4 +182,13 @@ class ArchiveView extends ChangeNotifier {
 
     return sortedByDistanceFrom(entries, from.latitude, from.longitude);
   }
+
+  /// [entries] narrowed by the current search.
+  List<Entry> matching(List<Entry> entries) =>
+      _query.trim().isEmpty ? entries : entriesMatching(entries, _query);
+
+  /// Everything this view does to an already tag-filtered list: search, then
+  /// sort. One call so the timeline and the map cannot apply one and forget
+  /// the other.
+  List<Entry> arrange(List<Entry> entries) => order(matching(entries));
 }

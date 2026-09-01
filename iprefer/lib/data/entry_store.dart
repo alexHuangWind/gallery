@@ -65,11 +65,33 @@ class EntryStore extends ChangeNotifier {
     return File(p.join(photosRoot, stored));
   }
 
+  /// Memoized [entries]. Invalidated in [notifyListeners], which every
+  /// mutation on this class already goes through.
+  List<Entry>? _sorted;
+  Map<String, int>? _counts;
+  List<String>? _byUse;
+
+  @override
+  void notifyListeners() {
+    _sorted = null;
+    _counts = null;
+    _byUse = null;
+    super.notifyListeners();
+  }
+
   /// All entries, newest first.
+  ///
+  /// Cached because this copies and sorts the whole box, and a single frame
+  /// asks for it several times over — the timeline, the map (kept alive
+  /// offstage by the IndexedStack), and both recall banners. Searching made
+  /// that a per-keystroke cost.
+  ///
+  /// The list is unmodifiable: callers used to receive a fresh copy they could
+  /// safely sort in place, and now they share one.
   List<Entry> get entries {
-    final all = _box.values.toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return all;
+    return _sorted ??= List.unmodifiable(
+      _box.values.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+    );
   }
 
   bool get isEmpty => _box.isEmpty;
@@ -82,25 +104,31 @@ class EntryStore extends ChangeNotifier {
   /// Drives the compose suggestions, so the shelves the user actually reaches
   /// for float to the front instead of us guessing for them.
   List<String> get tagsByUse {
-    final counts = tagCounts;
-    final names = counts.keys.toList()
-      ..sort((a, b) {
-        final byCount = counts[b]!.compareTo(counts[a]!);
-        return byCount != 0 ? byCount : a.compareTo(b);
-      });
-    return names;
+    return _byUse ??= () {
+      final counts = tagCounts;
+      return List<String>.unmodifiable(counts.keys.toList()
+        ..sort((a, b) {
+          final byCount = counts[b]!.compareTo(counts[a]!);
+          return byCount != 0 ? byCount : a.compareTo(b);
+        }));
+    }();
   }
 
   /// How many entries carry each tag.
+  /// Cached alongside [entries], and for the same reason: the filter bar asks
+  /// for this on both tabs, and `effective(tagsByUse)` asks again — several
+  /// full scans of the box per keystroke once search existed.
   Map<String, int> get tagCounts {
-    final counts = <String, int>{};
-    for (final e in _box.values) {
-      // toSet(): one entry counts once per tag even if its list repeats one.
-      for (final t in e.tags.toSet()) {
-        counts[t] = (counts[t] ?? 0) + 1;
+    return _counts ??= () {
+      final counts = <String, int>{};
+      for (final e in _box.values) {
+        // toSet(): one entry counts once per tag even if its list repeats one.
+        for (final t in e.tags.toSet()) {
+          counts[t] = (counts[t] ?? 0) + 1;
+        }
       }
-    }
-    return counts;
+      return Map<String, int>.unmodifiable(counts);
+    }();
   }
 
   /// Entries carrying *any* of [tags] (OR, not AND), newest first.

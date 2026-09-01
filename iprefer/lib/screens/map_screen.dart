@@ -97,15 +97,31 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<EntryStore>();
-    final active = context.watch<ArchiveView>().effective(store.tagsByUse);
-    final located =
-        store.withAnyTag(active).where((e) => e.hasLocation).toList();
+    final view = context.watch<ArchiveView>();
+    final active = view.effective(store.tagsByUse);
+    // matching, not arrange: the map has its own geography and must not be
+    // re-ordered by the timeline's nearest-first sort.
+    final located = view
+        .matching(store.withAnyTag(active))
+        .where((e) => e.hasLocation)
+        .toList();
 
     if (located.isEmpty) {
+      // The camera has nothing to fit, and the FlutterMap widget is leaving
+      // the tree — so forget what it was fitted to. Otherwise clearing the
+      // search rebuilds the map, initialCameraFit re-applies, and _fitTo
+      // no-ops on a signature that still matches: the user's pan and zoom
+      // would be dropped with nothing here admitting it.
+      _fittedSignature = null;
       return Column(
         children: [
           const TagFilterBar(),
-          Expanded(child: _MapEmptyState(filtered: active.isNotEmpty)),
+          Expanded(
+            child: _MapEmptyState(
+              filtered: active.isNotEmpty,
+              query: view.query.trim(),
+            ),
+          ),
         ],
       );
     }
@@ -254,15 +270,22 @@ class _YouAreHereDot extends StatelessWidget {
 }
 
 class _MapEmptyState extends StatelessWidget {
-  const _MapEmptyState({this.filtered = false});
+  const _MapEmptyState({this.filtered = false, this.query = ''});
 
   /// True when a tag filter is what emptied the map, rather than a genuinely
   /// empty archive — the two need different copy or the user thinks their
   /// entries vanished.
   final bool filtered;
 
+  /// What is being searched for, if anything. Takes precedence over [filtered]
+  /// in the copy: a search is the more recent, more deliberate act, so it is
+  /// the explanation the user is looking for.
+  final String query;
+
   @override
   Widget build(BuildContext context) {
+    final searching = query.isNotEmpty;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
@@ -270,7 +293,12 @@ class _MapEmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              filtered ? 'nothing under that, here' : 'no places yet',
+              searching
+                  ? 'nothing to put on the map'
+                  : filtered
+                      ? 'nothing under that, here'
+                      : 'no places yet',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: AppTheme.serif,
                 fontStyle: FontStyle.italic,
@@ -280,12 +308,26 @@ class _MapEmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              filtered
-                  ? 'no tagged entries have a place yet.'
-                  : 'record something while you are out,\nand it will land here.',
+              searching
+                  ? filtered
+                      // Both filters are on, so neither alone explains it.
+                      ? 'nothing matching “$query” under those tags has a place.'
+                      : 'nothing matching “$query” has a place.'
+                  : filtered
+                      ? 'no tagged entries have a place yet.'
+                      : 'record something while you are out,\nand it will land here.',
               textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(color: context.colors.mutedText, height: 1.5),
             ),
+            if (searching) ...[
+              const SizedBox(height: 18),
+              OutlinedButton(
+                onPressed: () => context.read<ArchiveView>().clearQuery(),
+                child: const Text('clear the search'),
+              ),
+            ],
           ],
         ),
       ),

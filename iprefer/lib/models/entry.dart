@@ -126,6 +126,38 @@ List<Entry> entriesWithAnyTag(Iterable<Entry> entries, Set<String> tags) {
   return entries.where((e) => tags.any(e.hasTag)).toList();
 }
 
+/// Entries matching a free-text [query], preserving the incoming order.
+///
+/// Searches the line, the tags and the place together, because those are the
+/// three ways someone remembers an entry — what they said, what shelf they put
+/// it on, and where they were. Splitting them into separate fields to search
+/// would make the user guess which one they meant.
+///
+/// Several words mean *all* of them (AND), each matched as a substring
+/// anywhere: "fern" finds "ferns", and "flat white" finds a flat white
+/// whether the words came from the line or from the place. A blank query means
+/// no filter, so everything comes back — search never empties the archive by
+/// accident.
+List<Entry> entriesMatching(Iterable<Entry> entries, String query) {
+  // trim() first: it and \s+ disagree on a few separators (U+0085 among
+  // them), so without this a query of only whitespace could survive the split
+  // as one literal term and match nothing — the opposite of "no filter".
+  final terms = query.trim().toLowerCase().split(RegExp(r'\s+'))
+    ..removeWhere((t) => t.isEmpty);
+  if (terms.isEmpty) return entries.toList();
+
+  return entries.where((e) {
+    // Built once per entry rather than once per term. Tags are joined with a
+    // space so a term can never span two of them.
+    final haystack = [
+      e.text,
+      e.placeLabel ?? '',
+      ...e.tags,
+    ].join(' ').toLowerCase();
+    return terms.every(haystack.contains);
+  }).toList();
+}
+
 /// What the archive has to say about today's date, if anything.
 @immutable
 class Anniversary {

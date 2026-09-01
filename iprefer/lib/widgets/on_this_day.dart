@@ -15,7 +15,12 @@ import 'entry_chip.dart';
 /// Like the recall banner it takes zero height when it has nothing to say,
 /// asks for no permission, and can be dismissed for the session.
 class OnThisDay extends StatefulWidget {
-  const OnThisDay({super.key, this.tags = const {}, this.today});
+  const OnThisDay({
+    super.key,
+    this.tags = const {},
+    this.today,
+    this.suppressed = false,
+  });
 
   /// Overrides "now", so the states this widget exists for can be rendered
   /// without waiting a year or moving the device clock.
@@ -24,6 +29,15 @@ class OnThisDay extends StatefulWidget {
   /// Narrows to the active tag filter, so a lit "wine" chip asks "what wine
   /// did I like a year ago today?".
   final Set<String> tags;
+
+  /// Hides the banner without unmounting it.
+  ///
+  /// A `if (…) …` in the parent's child list would tear this widget's State
+  /// down instead: the dismissal is meant to last the session, and the
+  /// location lookup behind it is a GPS read plus a reverse geocode. Passing
+  /// the suppression in keeps both.
+  final bool suppressed;
+
 
   @override
   State<OnThisDay> createState() => _OnThisDayState();
@@ -75,7 +89,7 @@ class _OnThisDayState extends State<OnThisDay> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    if (_dismissed) return const SizedBox.shrink();
+    if (_dismissed || widget.suppressed) return const SizedBox.shrink();
 
     final store = context.watch<EntryStore>();
     final anniversary = anniversaryOn(store.withAnyTag(widget.tags), _today);

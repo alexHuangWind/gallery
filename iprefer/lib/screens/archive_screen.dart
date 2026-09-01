@@ -45,42 +45,85 @@ class ArchiveScreen extends StatelessWidget {
     final view = context.watch<ArchiveView>();
     final active = view.effective(store.tagsByUse);
 
-    // Filtering is OR, and `active` only ever holds tags that still exist, so
-    // this list cannot come back empty while the store has entries — there is
-    // no "your filter matched nothing" state to handle here.
-    final entries = view.order(store.withAnyTag(active));
+    // Tag filtering is OR and `active` only ever holds tags that still exist,
+    // so tags alone cannot empty this list. Search can, and does — a typo is
+    // enough — so that state is handled below.
+    final entries = view.arrange(store.withAnyTag(active));
+
+    // Keyed lookup for findChildIndexCallback below. Built once per build
+    // rather than scanning the list per child.
+    final indexOfId = {
+      for (var i = 0; i < entries.length; i++) entries[i].id: i,
+    };
 
     return CustomScrollView(
+      // The only way to put an iOS keyboard away without also closing the
+      // search — the search key unfocuses too, but scrolling the results is
+      // the gesture people reach for.
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       slivers: [
         // Zero height until the user has tagged something.
         const SliverToBoxAdapter(child: TagFilterBar()),
         const SliverToBoxAdapter(child: SortBar()),
         // Zero height for a guest; one quiet line for an account.
         const SliverToBoxAdapter(child: BackupBar()),
+        // Both banners resurface entries the user did not ask for, which is
+        // the point — until they are looking for something specific, when it
+        // is just something else to read past. Suppressed rather than removed:
+        // dropping them from this list would tear down their State, losing a
+        // dismissal and re-running a GPS read on every search that starts or
+        // ends.
+        //
         // Surfaces only when the user is standing somewhere they've recorded
         // before; otherwise it takes zero height.
-        SliverToBoxAdapter(child: NearbyRecall(tags: active)),
+        SliverToBoxAdapter(
+          child: NearbyRecall(tags: active, suppressed: view.isSearching),
+        ),
         // The same "here is what you liked" payback, on the time axis.
         // Zero height on a day the archive has nothing to say about.
-        SliverToBoxAdapter(child: OnThisDay(tags: active)),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              childAspectRatio: 9 / 16,
+        SliverToBoxAdapter(
+          child: OnThisDay(tags: active, suppressed: view.isSearching),
+        ),
+        // A search that matched nothing replaces the grid and nothing else:
+        // the filter bar, the sort and the backup line all stay put, so a
+        // lapsed-token warning cannot vanish behind a typo.
+        if (entries.isEmpty)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: _NoMatches(
+              query: view.query.trim(),
+              filtered: active.isNotEmpty,
+              onRecord: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const ComposeScreen()),
+              ),
             ),
-            delegate: SliverChildBuilderDelegate(
-              // Keyed so recycling doesn't carry one card's extracted scrim
-              // over to another photo when the list re-sorts.
-              (context, i) =>
-                  _ArchiveTile(key: ValueKey(entries[i].id), entry: entries[i]),
-              childCount: entries.length,
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 14,
+                mainAxisSpacing: 14,
+                childAspectRatio: 9 / 16,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                // Keyed so recycling doesn't carry one card's extracted scrim
+                // over to another photo when the list re-sorts.
+                (context, i) =>
+                    _ArchiveTile(key: ValueKey(entries[i].id), entry: entries[i]),
+                childCount: entries.length,
+                // Without this, a keyed child whose index moved cannot be
+                // matched to its old Element: it is rebuilt from scratch, and
+                // every rebuilt card restarts its palette extraction — a
+                // decode and a quantization per visible tile, on every
+                // keystroke that reorders the results.
+                findChildIndexCallback: (key) =>
+                    indexOfId[(key as ValueKey<String>).value],
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -152,6 +195,82 @@ class _ArchiveTile extends StatelessWidget {
           createdAt: entry.createdAt,
           placeLabel: entry.placeLabel,
           compact: true,
+        ),
+      ),
+    );
+  }
+}
+
+/// The archive has entries, but none of them match what was typed.
+///
+/// Distinct from [_EmptyState] on purpose: "nothing here yet" invites a first
+/// recording, which is the wrong thing to say to someone who has fifty entries
+/// and a typo. This says what was searched and offers both ways out.
+class _NoMatches extends StatelessWidget {
+  const _NoMatches({
+    required this.query,
+    required this.filtered,
+    required this.onRecord,
+  });
+
+  final String query;
+
+  /// True when a tag filter is *also* narrowing things. The copy has to say
+  /// so: with "wine" lit, a search for "ferns" can match an entry that is
+  /// plainly in the archive, and "isn't in your archive yet" would be a lie
+  /// the user can disprove in two taps.
+  final bool filtered;
+
+  final VoidCallback onRecord;
+
+  String get _explanation {
+    if (query.isEmpty) return 'nothing is under that tag yet.';
+    return filtered
+        ? '“$query” isn\u2019t under the tags you have picked.'
+        : '“$query” isn\u2019t in your archive yet.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'nothing matches',
+              style: TextStyle(
+                fontFamily: AppTheme.serif,
+                fontStyle: FontStyle.italic,
+                fontSize: 24,
+                color: context.colors.ink,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              // The query is echoed so a stale search left open from an
+              // earlier session explains the empty page by itself.
+              _explanation,
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: context.colors.mutedText, height: 1.5),
+            ),
+            const SizedBox(height: 18),
+            if (query.isNotEmpty)
+              OutlinedButton(
+                onPressed: () => context.read<ArchiveView>().clearQuery(),
+                child: const Text('clear the search'),
+              ),
+            const SizedBox(height: 10),
+            // "I looked for it, it isn't there" is a reason to record it. The
+            // tag bar and the filter stay exactly as they were.
+            TextButton(
+              onPressed: onRecord,
+              child: const Text('record it now'),
+            ),
+          ],
         ),
       ),
     );

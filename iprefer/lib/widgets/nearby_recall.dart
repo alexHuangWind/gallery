@@ -20,6 +20,7 @@ class NearbyRecall extends StatefulWidget {
     super.key,
     this.radiusMetres = kRecallRadiusMetres,
     this.tags = const {},
+    this.suppressed = false,
   });
 
   final double radiusMetres;
@@ -27,6 +28,15 @@ class NearbyRecall extends StatefulWidget {
   /// Narrows recall to the active tag filter, so "wine" + standing here asks
   /// "what wine did I like here?".
   final Set<String> tags;
+
+  /// Hides the banner without unmounting it.
+  ///
+  /// A `if (…) …` in the parent's child list would tear this widget's State
+  /// down instead: the dismissal is meant to last the session, and the
+  /// location lookup behind it is a GPS read plus a reverse geocode. Passing
+  /// the suppression in keeps both.
+  final bool suppressed;
+
 
   @override
   State<NearbyRecall> createState() => _NearbyRecallState();
@@ -75,7 +85,9 @@ class _NearbyRecallState extends State<NearbyRecall>
   @override
   Widget build(BuildContext context) {
     final here = _here;
-    if (here == null || _dismissed) return const SizedBox.shrink();
+    if (here == null || _dismissed || widget.suppressed) {
+      return const SizedBox.shrink();
+    }
 
     final nearby = context
         .watch<EntryStore>()

@@ -260,6 +260,14 @@ class AppTheme {
         ),
         hintStyle: TextStyle(color: c.muted),
       ),
+      // The caret and the selection are surfaces too, and unthemed they come
+      // out of the seed as a warm brown — the one accent this palette does not
+      // have. Visible in any text field: compose, and the search bar.
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: c.ink,
+        selectionColor: c.ink.withValues(alpha: 0.18),
+        selectionHandleColor: c.ink,
+      ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: c.paper,
         surfaceTintColor: Colors.transparent,
