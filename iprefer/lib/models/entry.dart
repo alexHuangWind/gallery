@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show immutable;
 import 'package:hive/hive.dart';
 
 /// One recorded preference: a photo, a line, a moment — and, when we could get
@@ -124,6 +125,71 @@ List<Entry> entriesWithAnyTag(Iterable<Entry> entries, Set<String> tags) {
   if (tags.isEmpty) return entries.toList();
   return entries.where((e) => tags.any(e.hasTag)).toList();
 }
+
+/// What the archive has to say about today's date, if anything.
+@immutable
+class Anniversary {
+  const Anniversary({required this.entries, required this.label});
+
+  /// Newest first, all from the same anniversary.
+  final List<Entry> entries;
+
+  /// Reads as a sentence opener: "a year ago today".
+  final String label;
+}
+
+/// Entries recorded on this date in an earlier year — or, failing that, on
+/// this day of an earlier month.
+///
+/// The recall banner pays the user back for having recorded by *place*; this
+/// is the same mechanic on the other axis. The month fallback exists because
+/// a year is a long time to wait for a feature to exist at all: a young
+/// archive would otherwise be silent until its first birthday.
+///
+/// The most distant match wins. "A year ago today" is a better thing to be
+/// handed than "a month ago today", and once both exist the older one is the
+/// one you've had time to forget.
+Anniversary? anniversaryOn(Iterable<Entry> entries, DateTime today) {
+  final byYears = <int, List<Entry>>{};
+  final byMonths = <int, List<Entry>>{};
+
+  for (final entry in entries) {
+    final at = entry.createdAt;
+    if (!at.isBefore(DateTime(today.year, today.month, today.day))) continue;
+
+    if (at.month == today.month && at.day == today.day) {
+      final years = today.year - at.year;
+      if (years >= 1) (byYears[years] ??= []).add(entry);
+      continue;
+    }
+    if (at.day == today.day) {
+      final months = (today.year - at.year) * 12 + (today.month - at.month);
+      if (months >= 1) (byMonths[months] ??= []).add(entry);
+    }
+  }
+
+  String plural(int n, String unit) =>
+      n == 1 ? 'a $unit ago today' : '$n ${unit}s ago today';
+
+  if (byYears.isNotEmpty) {
+    final oldest = byYears.keys.reduce((a, b) => a > b ? a : b);
+    return Anniversary(
+      entries: _newestFirst(byYears[oldest]!),
+      label: plural(oldest, 'year'),
+    );
+  }
+  if (byMonths.isNotEmpty) {
+    final oldest = byMonths.keys.reduce((a, b) => a > b ? a : b);
+    return Anniversary(
+      entries: _newestFirst(byMonths[oldest]!),
+      label: plural(oldest, 'month'),
+    );
+  }
+  return null;
+}
+
+List<Entry> _newestFirst(List<Entry> entries) =>
+    entries..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
 /// Entries ordered by distance from a point, closest first.
 ///

@@ -7,6 +7,7 @@ import '../models/entry.dart';
 import '../theme.dart';
 import '../widgets/backup_bar.dart';
 import '../widgets/nearby_recall.dart';
+import '../widgets/on_this_day.dart';
 import '../widgets/preference_card.dart';
 import '../widgets/sort_bar.dart';
 import '../widgets/tag_filter_bar.dart';
@@ -59,6 +60,9 @@ class ArchiveScreen extends StatelessWidget {
         // Surfaces only when the user is standing somewhere they've recorded
         // before; otherwise it takes zero height.
         SliverToBoxAdapter(child: NearbyRecall(tags: active)),
+        // The same "here is what you liked" payback, on the time axis.
+        // Zero height on a day the archive has nothing to say about.
+        SliverToBoxAdapter(child: OnThisDay(tags: active)),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
           sliver: SliverGrid(
