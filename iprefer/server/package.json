@@ -1,0 +1,17 @@
+{
+  "name": "iprefer-sync",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "db:local": "wrangler d1 execute iprefer-sync --local --file=./schema.sql",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/protocol.test.mjs && node test/apple_auth.test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260820.1",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.125.0"
+  }
+}

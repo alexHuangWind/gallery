@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "iprefer-sync",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-20",
+  "observability": { "enabled": true },
+
+  // Records only — tiny rows. Photos never go in D1 (1 MB row cap, and the
+  // free tier is 500 MB per database).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "iprefer-sync",
+      // Local dev uses a local SQLite file and ignores this.
+      "database_id": "fd9257cd-3a5d-4c5c-8251-a0ca40de7514"
+    }
+  ],
+
+  // Photos. R2 because egress is free — a phone re-downloading its archive
+  // after a reinstall is the main traffic this app will ever generate.
+  "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "iprefer-photos" }]
+
+  // NOTE: DEV_AUTH deliberately lives in .dev.vars, not here.
+  // `wrangler dev` reads that file; `wrangler deploy` never uploads it. So
+  // the open token-minting endpoint (/v1/auth/dev) cannot reach production by
+  // forgetting to unset a var — it is structurally local-only.
+}

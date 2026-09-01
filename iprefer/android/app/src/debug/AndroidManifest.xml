@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Flutter tooling (hot reload / DevTools) needs network in debug. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+</manifest>

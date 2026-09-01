@@ -1,5 +1,10 @@
 # Flutter Gallery
 
+> **Looking for "I prefer"?** The active project in this fork is the
+> standalone Flutter app in [`iprefer/`](./iprefer/) — see
+> [`iprefer/README.md`](./iprefer/README.md). Everything below this note is
+> the untouched upstream Flutter Gallery it was forked from.
+
 Flutter Gallery is a resource to help developers evaluate and use Flutter.
 It is a collection of Material Design & Cupertino widgets, behaviors, and vignettes
 implemented with Flutter. We often get asked how one can see Flutter in action,

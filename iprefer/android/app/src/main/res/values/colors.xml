@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The adaptive icon's background layer. Paper, matching the iOS tile
+         and the app itself — it was dark, which inverted the mark and left
+         Android and iOS showing opposite icons. -->
+    <color name="ic_launcher_background">#FAF8F4</color>
+
+    <!-- The window behind the splash. Must equal AppColors.light.paper: the
+         system paints this before Flutter's first frame, so any other value
+         is a flash of the wrong colour on every cold start. -->
+    <color name="launch_background">#FAF8F4</color>
+</resources>
