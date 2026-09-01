@@ -1,13 +1,13 @@
 /// End-to-end protocol tests against a running `wrangler dev`.
 ///
-///   npm run db:local     # once, to create the tables in the local D1
-///   npm run dev          # in one terminal
-///   npm test             # in another
+///   npm test             # starts the server, applies the schema, tears down
+///
+/// (Set SYNC_URL to point at a server you started yourself instead.)
 ///
 /// Plain node, no test framework: this exercises the real Worker over real
 /// HTTP with real D1 and R2 bindings, which is the part worth proving.
 
-const BASE = process.env.SYNC_URL ?? 'http://127.0.0.1:8787';
+import { BASE } from './config.mjs';
 
 let passed = 0;
 const failures = [];
@@ -132,6 +132,52 @@ async function main() {
   const missing = await api(`/v1/photos/${id2}.jpg`, { token: alice.token });
   eq('an unuploaded photo is 404', missing.status, 404);
 
+  // --- what a photo upload is allowed to be -------------------------------
+
+  // An entry id nobody ever pushed. Allowing this would make a valid token a
+  // licence to fill R2 with objects no delete op will ever collect.
+  const ghost = crypto.randomUUID();
+  const orphan = await api(`/v1/photos/${ghost}.jpg`, {
+    token: alice.token, method: 'PUT', raw: new Uint8Array(64), contentType: 'image/jpeg',
+  });
+  eq('a photo for an entry that was never pushed is refused', orphan.status, 409);
+  const orphanHead = await api(`/v1/photos/${ghost}.jpg`, { token: alice.token, method: 'HEAD' });
+  eq('and nothing was written for it', orphanHead.status, 404);
+
+  // No content-length at all. This used to read as zero, sail past the size
+  // cap, and then hand R2 an unsized stream, which threw a 500.
+  const chunked = await fetch(`${BASE}/v1/photos/${id2}.jpg`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${alice.token}`, 'content-type': 'image/jpeg' },
+    body: new ReadableStream({
+      start(c) { c.enqueue(new Uint8Array(32)); c.close(); },
+    }),
+    duplex: 'half',
+  });
+  eq('a chunked upload is 411, not 500', chunked.status, 411);
+
+  // The uploader does not get to choose what a browser will treat the bytes
+  // as: `text/html` under a `.jpg` name must not round-trip.
+  const htmlUpload = await api(`/v1/photos/${id2}.jpg`, {
+    token: alice.token,
+    method: 'PUT',
+    raw: new TextEncoder().encode('<script>alert(1)</script>'),
+    contentType: 'text/html',
+  });
+  eq('an upload claiming text/html still stores', htmlUpload.status, 204);
+  const served = await fetch(`${BASE}/v1/photos/${id2}.jpg`, {
+    headers: { Authorization: `Bearer ${alice.token}` },
+  });
+  eq('the served type comes from the extension', served.headers.get('content-type'), 'image/jpeg');
+  eq('and sniffing is turned off', served.headers.get('x-content-type-options'), 'nosniff');
+  await served.arrayBuffer();
+
+  const pngServed = await fetch(`${BASE}/v1/photos/${id1}.jpg`, {
+    headers: { Authorization: `Bearer ${alice.token}` },
+  });
+  eq('a jpg uploaded as jpeg is unchanged', pngServed.headers.get('content-type'), 'image/jpeg');
+  await pngServed.arrayBuffer();
+
   // --- tenant isolation ---------------------------------------------------
   const bobPull = await api('/v1/sync/pull?since=0', { token: bob.token });
   eq("another user sees none of alice's ops", bobPull.json?.ops?.length, 0);
@@ -189,6 +235,49 @@ async function main() {
 
   const traversal = await api('/v1/photos/..%2F..%2Fetc%2Fpasswd', { token: alice.token });
   check('rejects path traversal in a photo name', traversal.status === 400, `got ${traversal.status}`);
+
+  // --- account deletion ---------------------------------------------------
+  //
+  // App Store Guideline 5.1.1(v). Its own user, so it can be checked by
+  // signing back in as the same local id: dev auth is stable, so the second
+  // token addresses the very same account and would still see the old rows if
+  // they had survived.
+  const carolLocal = `carol-${crypto.randomUUID()}`;
+  const carol = (await api('/v1/auth/dev', { method: 'POST', body: { localId: carolLocal } })).json;
+  const carolEntry = crypto.randomUUID();
+  await api('/v1/sync/push', {
+    token: carol.token,
+    method: 'POST',
+    body: { ops: [{ type: 'create', entryId: carolEntry, payload: entry(carolEntry) }] },
+  });
+  await api(`/v1/photos/${carolEntry}.jpg`, {
+    token: carol.token, method: 'PUT', raw: new Uint8Array(512), contentType: 'image/jpeg',
+  });
+  eq('the account has a photo before deletion',
+    (await api(`/v1/photos/${carolEntry}.jpg`, { token: carol.token, method: 'HEAD' })).status, 200);
+
+  const gone = await api('/v1/account', { token: carol.token, method: 'DELETE' });
+  eq('deleting the account returns 204', gone.status, 204);
+
+  const goneAgain = await api('/v1/account', { token: carol.token, method: 'DELETE' });
+  eq('deleting it again is still 204', goneAgain.status, 204);
+
+  const deadToken = await api('/v1/sync/pull?since=0', { token: carol.token });
+  eq("a deleted account's token no longer authenticates", deadToken.status, 401);
+
+  // Same local id, so the same user id — anything left behind would surface.
+  const carol2 = (await api('/v1/auth/dev', { method: 'POST', body: { localId: carolLocal } })).json;
+  eq('signing back in lands on the same account', carol2.userId, carol.userId);
+  eq('the ops are gone',
+    (await api('/v1/sync/pull?since=0', { token: carol2.token })).json?.ops?.length, 0);
+  eq('the photo is gone',
+    (await api(`/v1/photos/${carolEntry}.jpg`, { token: carol2.token, method: 'HEAD' })).status, 404);
+
+  const anonDelete = await api('/v1/account', { method: 'DELETE' });
+  eq('deleting an account without a token is 401', anonDelete.status, 401);
+
+  eq("deleting one account leaves another's archive alone",
+    (await api('/v1/sync/pull?since=0', { token: alice.token })).json?.ops?.length, 3);
 
   // --- report -------------------------------------------------------------
   console.log(`\n${passed} passed, ${failures.length} failed`);

@@ -7,9 +7,14 @@ export interface Env {
   /// "1" enables /v1/auth/dev. Absent in production.
   DEV_AUTH?: string;
   /// Overridable so tests can point at a local JWKS. Defaults to Apple's.
+  /// Note it is NOT set in .dev.vars: a plain `wrangler dev` should talk to
+  /// the real key server, not to a test double that may not be listening.
   APPLE_JWKS_URL?: string;
   /// The bundle id an identity token must be addressed to. Defaults to ours.
   APPLE_AUDIENCE?: string;
+  /// How long an unknown `kid` is refused before another forced JWKS refetch
+  /// is allowed. Exists so tests can shrink the window; defaults to 5 minutes.
+  APPLE_JWKS_REFETCH_COOLDOWN_MS?: string;
 }
 
 /// The wire shape of an entry. Mirrors lib/models/entry.dart, except
