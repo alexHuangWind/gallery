@@ -39,6 +39,10 @@ dependencies:
   # Secondary share of the rendered image
   share_plus: ^10.0.2
 
+  # Local export: one zip of the whole archive, so the record does not
+  # depend on us existing. Pure Dart, no platform code.
+  archive: ^4.0.9
+
   # Talking to the sync backend (server/). Optional at runtime: with no
   # configured endpoint the app behaves exactly as it did before — local only.
   http: ^1.2.2

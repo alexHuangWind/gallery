@@ -123,6 +123,20 @@ void main() {
       expect(AppTheme.light(), isNot(AppTheme.dark()));
     });
 
+    test('no surface tints itself with the seed', () {
+      // ColorScheme.fromSeed derives warm browns, and any M3 surface left
+      // unthemed washes itself with colorScheme.surfaceTint at elevation. The
+      // app bar, the menu, the sheet and the dialog have all been caught doing
+      // it; this is the list, so the next one added is caught here instead.
+      for (final theme in [AppTheme.light(), AppTheme.dark()]) {
+        expect(theme.appBarTheme.surfaceTintColor, Colors.transparent);
+        expect(theme.popupMenuTheme.surfaceTintColor, Colors.transparent);
+        expect(theme.bottomSheetTheme.surfaceTintColor, Colors.transparent);
+        expect(theme.dialogTheme.surfaceTintColor, Colors.transparent);
+        expect(theme.navigationBarTheme.surfaceTintColor, Colors.transparent);
+      }
+    });
+
     test('the app bar never tints itself', () {
       // elevation: 0 does not stop M3 re-elevating the bar to 3.0 when content
       // scrolls under it and washing it with colorScheme.surfaceTint — a warm

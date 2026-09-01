@@ -268,6 +268,20 @@ class AppTheme {
         selectionColor: c.ink.withValues(alpha: 0.18),
         selectionHandleColor: c.ink,
       ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: c.paper,
+        surfaceTintColor: Colors.transparent,
+        elevation: 3,
+        textStyle: TextStyle(fontSize: 15, color: c.ink),
+        // The border is what separates the menu from the page in the dark:
+        // its fill is `paper`, the page is `paper`, and a black elevation
+        // shadow on a near-black ground is invisible. Killing the seed's tint
+        // removed the only edge M3 was giving it.
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: c.muted.withValues(alpha: 0.3)),
+        ),
+      ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: c.paper,
         surfaceTintColor: Colors.transparent,

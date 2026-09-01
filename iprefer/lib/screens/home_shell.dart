@@ -1,7 +1,14 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../data/archive_export.dart';
 import '../data/archive_view.dart';
+import '../data/entry_store.dart';
 import '../data/session.dart';
 import '../theme.dart';
 import 'archive_screen.dart';
@@ -65,6 +72,88 @@ class _HomeShellState extends State<HomeShell> {
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  /// True while the zip is being written. Held in state, not a bare field:
+  /// the menu item has to *look* unavailable, or a second tap is a control
+  /// that silently does nothing.
+  bool _exporting = false;
+
+  Future<void> _export() async {
+    if (_exporting) return;
+
+    final store = context.read<EntryStore>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (store.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('nothing to save yet')),
+      );
+      return;
+    }
+
+    // Resolved before the first await. iPad anchors the share sheet to this
+    // rect, and a RenderBox read after an await can be detached — signing out
+    // mid-pack swaps this whole screen out, and asking a detached box for its
+    // position throws, turning a successful export into "couldn't pack your
+    // archive" on the login screen.
+    final box = context.findRenderObject() as RenderBox?;
+    final origin =
+        box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+
+    setState(() => _exporting = true);
+    Directory? workDir;
+    try {
+      final temp = await getTemporaryDirectory();
+      workDir = Directory(p.join(temp.path, 'export'));
+      final result = await ArchiveExport.pack(
+        entries: store.entries,
+        photosRoot: store.photosRoot,
+        workDir: workDir,
+        now: DateTime.now(),
+      );
+
+      // Before the sheet, not after: on iOS the share future completes when
+      // the sheet is dismissed, so warning afterwards tells someone who just
+      // cancelled about gaps in a copy they decided not to make.
+      if (result.missingPhotos > 0) {
+        final n = result.missingPhotos;
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              "$n photo${n == 1 ? '' : 's'} "
+              "${n == 1 ? "wasn't" : "weren't"} on this phone — "
+              'the words are still in the copy',
+            ),
+          ),
+        );
+      }
+
+      await Share.shareXFiles(
+        [XFile(result.file.path)],
+        sharePositionOrigin: origin,
+      );
+    } catch (e) {
+      // Recorded, because disk-full, an unreadable photo and a detached
+      // render object all reach the user as this one sentence.
+      debugPrint('export failed: $e');
+      messenger.showSnackBar(
+        const SnackBar(content: Text("couldn't pack your archive — try again")),
+      );
+    } finally {
+      // A whole second copy of the archive, otherwise: this lives in
+      // Library/Caches, which iOS does not reliably reclaim, and share_plus
+      // on Android has already copied what it needs into its own cache. Both
+      // platforms are done with our file by the time this future completes.
+      try {
+        if (workDir != null && workDir.existsSync()) {
+          workDir.deleteSync(recursive: true);
+        }
+      } catch (_) {
+        // Cleanup is best-effort; the next export clears the directory anyway.
+      }
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   void _compose() {
@@ -147,23 +236,49 @@ class _HomeShellState extends State<HomeShell> {
               icon: const Icon(Icons.search, size: 22),
               onPressed: _openSearch,
             ),
-          // Load-bearing, not cosmetic: ArchiveView.reset() below cannot
-          // reach _searching or the controller, so signing out from an open
-          // search would leave a stale field over a cleared query. Hiding the
-          // control means the only way out of search is _closeSearch.
+          // Load-bearing, not cosmetic: ArchiveView.reset() cannot reach
+          // _searching or the controller, so signing out from an open search
+          // would leave a stale field over a cleared query. Hiding the whole
+          // menu means the only way out of search is _closeSearch.
+          //
+          // A menu rather than a third icon: the bar has to hold the title as
+          // well, and two of these are things you do once in a while, not
+          // controls you want under your thumb.
           if (!_searching)
-            IconButton(
-              tooltip: 'sign out',
-              icon: const Icon(Icons.logout, size: 20),
-              onPressed: () {
-                // Reset BEFORE signOut: the next user must not inherit this
-                // one's filter, sort, or last known coordinates. This is the
-                // only sign-out path today; if Firebase ever adds another
-                // (expiry, revocation), move this pairing into main.dart's
-                // composition root next to the store→prune listener.
-                context.read<ArchiveView>().reset();
-                context.read<Session>().signOut();
+            PopupMenuButton<_Overflow>(
+              tooltip: 'more',
+              icon: const Icon(Icons.more_vert, size: 20),
+              position: PopupMenuPosition.under,
+              onSelected: (item) {
+                switch (item) {
+                  case _Overflow.export:
+                    _export();
+                  case _Overflow.signOut:
+                    // Reset BEFORE signOut: the next user must not inherit
+                    // this one's filter, sort, or last known coordinates.
+                    // This is the only sign-out path today; if another ever
+                    // appears (expiry, revocation), move this pairing into
+                    // main.dart's composition root next to the store→prune
+                    // listener.
+                    context.read<ArchiveView>().reset();
+                    context.read<Session>().signOut();
+                }
               },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: _Overflow.export,
+                  enabled: !_exporting,
+                  child: Text(
+                    _exporting
+                        ? 'packing your archive…'
+                        : 'save a copy of everything',
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: _Overflow.signOut,
+                  child: Text('sign out'),
+                ),
+              ],
             ),
         ],
       ),
@@ -248,3 +363,6 @@ class _SearchField extends StatelessWidget {
     );
   }
 }
+
+/// The app bar's overflow items.
+enum _Overflow { export, signOut }
