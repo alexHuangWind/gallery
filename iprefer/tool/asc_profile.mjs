@@ -1,11 +1,16 @@
-// Ensures an iOS App Store provisioning profile exists for the bundle id and
-// installs it locally, then prints "PROFILE <name>" for the export step.
+// Ensures an iOS provisioning profile exists for the bundle id and installs it
+// locally, then prints "PROFILE <name>" for the export step.
+//
+//   node tool/asc_profile.mjs                 # App Store profile (TestFlight)
+//   node tool/asc_profile.mjs --development   # dev profile with every
+//                                             # registered device, for a
+//                                             # direct install over USB/Wi-Fi
 //
 // Uses the App Store Connect API key on this machine (key id + issuer + .p8
 // under ~/.appstoreconnect). Auto-signing via `xcodebuild -allowProvisioning
 // Updates` needs the key to have cloud-managed-certificate access, which this
-// team's key does not — so we mint a profile against the existing Apple
-// Distribution certificate and sign manually instead.
+// team's key does not — so we mint a profile against the existing certificate
+// and sign manually instead.
 import {
   existsSync,
   mkdirSync,
@@ -19,7 +24,11 @@ import { homedir } from 'node:os';
 
 const KID = 'WUD39Q6XN3';
 const BUNDLE_ID = 'com.iprefer.iprefer';
-const PROFILE_NAME = 'iPrefer App Store';
+
+const DEVELOPMENT = process.argv.includes('--development');
+const PROFILE_NAME = DEVELOPMENT ? 'iPrefer Development' : 'iPrefer App Store';
+const PROFILE_TYPE = DEVELOPMENT ? 'IOS_APP_DEVELOPMENT' : 'IOS_APP_STORE';
+const CERT_TYPE = DEVELOPMENT ? /^DEVELOPMENT$/i : /DISTRIBUTION/i;
 
 const iss = readFileSync(`${homedir()}/.appstoreconnect/issuer_id`, 'utf8').trim();
 const key = readFileSync(`${homedir()}/.appstoreconnect/private_keys/AuthKey_${KID}.p8`, 'utf8');
@@ -79,12 +88,33 @@ function install(attrs) {
   pruneLocalTwins(attrs.uuid);
 }
 
+/// Every enabled iPhone/iPad on the account. A development profile is only
+/// valid for the devices baked into it, so a phone registered after the
+/// profile was minted needs the profile re-made — see the reuse check below.
+async function enabledDevices() {
+  const res = await api('/v1/devices?limit=200&filter[status]=ENABLED&filter[platform]=IOS');
+  return res.data || [];
+}
+
+const devices = DEVELOPMENT ? await enabledDevices() : [];
+
 // Reuse an existing valid profile of this name if present.
 const existing = await api(`/v1/profiles?filter[name]=${encodeURIComponent(PROFILE_NAME)}&include=certificates`);
 const found = existing.data || [];
 const active = found.find((p) => p.attributes.profileState === 'ACTIVE');
-if (active) {
-  const full = await api(`/v1/profiles/${active.id}?fields[profiles]=name,uuid,profileContent,profileState`);
+let reusable = active;
+if (active && DEVELOPMENT) {
+  // Only reusable if it already covers every device we know about.
+  const covered = await api(`/v1/profiles/${active.id}/devices?limit=200`);
+  const ids = new Set((covered.data || []).map((d) => d.id));
+  const missing = devices.filter((d) => !ids.has(d.id));
+  if (missing.length) {
+    process.stderr.write(`profile ${PROFILE_NAME} lacks ${missing.length} device(s); re-minting\n`);
+    reusable = null;
+  }
+}
+if (reusable) {
+  const full = await api(`/v1/profiles/${reusable.id}?fields[profiles]=name,uuid,profileContent,profileState`);
   install(full.data.attributes);
   process.stderr.write(`reusing profile ${PROFILE_NAME}\n`);
   process.stdout.write(PROFILE_NAME);
@@ -104,29 +134,37 @@ for (const stale of found) {
   );
 }
 
-// Otherwise mint one against the distribution cert + bundle id.
+// Otherwise mint one against the right cert + bundle id (+ devices).
 const [certs, bundles] = await Promise.all([
   api('/v1/certificates?limit=200'),
   api(`/v1/bundleIds?filter[identifier]=${BUNDLE_ID}`),
 ]);
-const cert = certs.data.find((c) => /DISTRIBUTION/i.test(c.attributes.certificateType));
-if (!cert) throw new Error('no distribution certificate on the account');
+const cert = certs.data.find((c) => CERT_TYPE.test(c.attributes.certificateType));
+if (!cert) throw new Error(`no ${DEVELOPMENT ? 'development' : 'distribution'} certificate on the account`);
 const bundle = bundles.data[0];
 if (!bundle) throw new Error(`bundle id ${BUNDLE_ID} is not registered`);
+if (DEVELOPMENT && devices.length === 0) {
+  throw new Error('no enabled iOS devices registered — a development profile needs at least one');
+}
+
+const relationships = {
+  bundleId: { data: { type: 'bundleIds', id: bundle.id } },
+  certificates: { data: [{ type: 'certificates', id: cert.id }] },
+};
+if (DEVELOPMENT) {
+  relationships.devices = { data: devices.map((d) => ({ type: 'devices', id: d.id })) };
+}
 
 const created = await api('/v1/profiles', {
   method: 'POST',
   body: JSON.stringify({
     data: {
       type: 'profiles',
-      attributes: { name: PROFILE_NAME, profileType: 'IOS_APP_STORE' },
-      relationships: {
-        bundleId: { data: { type: 'bundleIds', id: bundle.id } },
-        certificates: { data: [{ type: 'certificates', id: cert.id }] },
-      },
+      attributes: { name: PROFILE_NAME, profileType: PROFILE_TYPE },
+      relationships,
     },
   }),
 });
 install(created.data.attributes);
-process.stderr.write(`created profile ${PROFILE_NAME}\n`);
+process.stderr.write(`created profile ${PROFILE_NAME}${DEVELOPMENT ? ` (${devices.length} device(s))` : ''}\n`);
 process.stdout.write(PROFILE_NAME);
