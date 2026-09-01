@@ -9,6 +9,7 @@ import 'package:hive/hive.dart';
 import 'package:iprefer/data/entry_store.dart';
 import 'package:iprefer/models/entry.dart';
 import 'package:iprefer/theme.dart';
+import 'package:iprefer/widgets/entry_chip.dart';
 import 'package:iprefer/widgets/on_this_day.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
@@ -99,6 +100,23 @@ void main() {
 
     // Without the month fallback this feature would be invisible for a year.
     expect(find.text('a month ago today'), findsOneWidget);
+  });
+
+  testWidgets('each chip is keyed to its entry', (tester) async {
+    await seed(tester, DateTime(2025, 8, 25, 9), 'flowers that outshout the street');
+    await seed(tester, DateTime(2025, 8, 25, 18), 'water that forgets to hurry');
+
+    await pump(tester);
+
+    // Unkeyed, the strip's elements are matched by position: an entry
+    // arriving at the head hands every chip below it a different photo to
+    // decode, on a list that exists to be scrolled.
+    final ids = store.entries.map((e) => e.id).toSet();
+    final keys = tester
+        .widgetList<EntryChip>(find.byType(EntryChip))
+        .map((chip) => (chip.key! as ValueKey<String>).value);
+    expect(keys, hasLength(2));
+    expect(keys, everyElement(isIn(ids)));
   });
 
   testWidgets('dismissing it collapses the banner for the session',
