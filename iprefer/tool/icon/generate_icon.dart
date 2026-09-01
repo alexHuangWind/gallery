@@ -11,7 +11,9 @@
 /// is set in.
 library;
 
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -32,16 +34,26 @@ const _ink = Color(0xFF1A1A1A);
 /// The mark is the first letter of the card's signature lockup, in the same
 /// italic serif. Not a picture of the app — the app's own handwriting.
 class _AppIcon extends StatelessWidget {
-  const _AppIcon({required this.side});
+  const _AppIcon({
+    required this.side,
+    this.transparent = false,
+    this.scale = 1.0,
+  });
 
   final double side;
+
+  /// Adaptive-icon foregrounds sit over a background layer of their own.
+  final bool transparent;
+
+  /// Shrinks the mark within the tile, for the adaptive safe zone.
+  final double scale;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: side,
       height: side,
-      color: _paper,
+      color: transparent ? const Color(0x00000000) : _paper,
       child: Center(
         // Nudged off true centre: an italic glyph's optical centre sits left
         // and low of its bounding box, and centring the box makes it look
@@ -55,7 +67,7 @@ class _AppIcon extends StatelessWidget {
               fontFamily: 'PlayfairDisplay',
               fontStyle: FontStyle.italic,
               fontWeight: FontWeight.w500,
-              fontSize: side * _glyphScale,
+              fontSize: side * _glyphScale * scale,
               height: 1.0,
               color: _ink,
             ),
@@ -85,7 +97,7 @@ const _iosSizes = <String, int>{
   'Icon-App-1024x1024@1x.png': 1024,
 };
 
-/// Android launcher densities.
+/// Android launcher densities (the legacy square icon, for API 24-25).
 const _androidSizes = <String, int>{
   'mipmap-mdpi': 48,
   'mipmap-hdpi': 72,
@@ -93,6 +105,84 @@ const _androidSizes = <String, int>{
   'mipmap-xxhdpi': 144,
   'mipmap-xxxhdpi': 192,
 };
+
+/// Adaptive-icon foreground sizes: 108dp at each density.
+///
+/// From API 26 the launcher reads mipmap-anydpi-v26/ic_launcher.xml, which
+/// outranks every density folder — so the legacy PNGs above are invisible on
+/// effectively every real device, and shipping only those left the app with
+/// two contradictory icons split by OS version.
+const _androidForeground = <String, int>{
+  'mipmap-mdpi': 108,
+  'mipmap-hdpi': 162,
+  'mipmap-xhdpi': 216,
+  'mipmap-xxhdpi': 324,
+  'mipmap-xxxhdpi': 432,
+};
+
+/// The adaptive foreground is 108dp but only the middle 72dp is guaranteed
+/// visible — the launcher masks and parallaxes the rest. The glyph is scaled
+/// to sit inside that safe zone rather than being cropped by a round mask.
+const _safeZone = 72 / 108;
+
+/// Encodes RGBA pixels as a colour-type-2 (RGB, no alpha) PNG.
+///
+/// Hand-rolled because the alternative is a new dependency for what is, at
+/// this size, four chunks and a zlib stream — and because the one property
+/// that matters (no alpha channel) has to be guaranteed, not hoped for.
+Uint8List _opaquePng(Uint8List rgba, int width, int height) {
+  // Each scanline is prefixed with filter type 0 (None).
+  final raw = BytesBuilder();
+  for (var y = 0; y < height; y++) {
+    raw.addByte(0);
+    for (var x = 0; x < width; x++) {
+      final i = (y * width + x) * 4;
+      raw..addByte(rgba[i])..addByte(rgba[i + 1])..addByte(rgba[i + 2]);
+    }
+  }
+
+  final out = BytesBuilder()
+    ..add(const [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+  void chunk(String type, List<int> body) {
+    final data = Uint8List(body.length + 4)
+      ..setAll(0, ascii.encode(type))
+      ..setAll(4, body);
+    out
+      ..add((ByteData(4)..setUint32(0, body.length)).buffer.asUint8List())
+      ..add(data)
+      ..add((ByteData(4)..setUint32(0, _crc32(data))).buffer.asUint8List());
+  }
+
+  final ihdr = ByteData(13)
+    ..setUint32(0, width)
+    ..setUint32(4, height)
+    ..setUint8(8, 8) // bit depth
+    ..setUint8(9, 2) // colour type 2 = truecolour, NO alpha
+    ..setUint8(10, 0)
+    ..setUint8(11, 0)
+    ..setUint8(12, 0);
+  chunk('IHDR', ihdr.buffer.asUint8List());
+  chunk('IDAT', ZLibCodec(level: 9).encode(raw.takeBytes()));
+  chunk('IEND', const []);
+  return out.takeBytes();
+}
+
+final _crcTable = List<int>.generate(256, (n) {
+  var c = n;
+  for (var k = 0; k < 8; k++) {
+    c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+  }
+  return c;
+});
+
+int _crc32(List<int> bytes) {
+  var c = 0xFFFFFFFF;
+  for (final b in bytes) {
+    c = _crcTable[(c ^ b) & 0xFF] ^ (c >> 8);
+  }
+  return (c ^ 0xFFFFFFFF) & 0xFFFFFFFF;
+}
 
 void main() {
   testWidgets('generate the app icon at every required size', (tester) async {
@@ -130,9 +220,14 @@ void main() {
     Future<void> write(String path, int px) async {
       final image = await boundary.toImage(pixelRatio: px / side);
       try {
-        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        // Raw RGBA, then re-encoded as RGB. toImage always produces an alpha
+        // channel, and Apple rejects a marketing icon that has one
+        // (ITMS-90717) — the ground here is opaque paper, so the channel is
+        // pure liability. Encoding all sizes the same way keeps them
+        // consistent and the files smaller.
+        final raw = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
         final file = File(path)..parent.createSync(recursive: true);
-        file.writeAsBytesSync(data!.buffer.asUint8List());
+        file.writeAsBytesSync(_opaquePng(raw!.buffer.asUint8List(), px, px));
       } finally {
         image.dispose();
       }
@@ -152,6 +247,40 @@ void main() {
           'android/app/src/main/res/${entry.key}/ic_launcher.png',
           entry.value,
         );
+      }
+    });
+
+    // The foreground layer is the same mark on a transparent ground, drawn
+    // smaller so the mask cannot clip it. Rendered from its own boundary.
+    final fgKey = GlobalKey();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: fgKey,
+        child: const Directionality(
+          textDirection: TextDirection.ltr,
+          child: _AppIcon(side: side, transparent: true, scale: _safeZone),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final fgBoundary =
+        fgKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+
+    await tester.runAsync(() async {
+      for (final entry in _androidForeground.entries) {
+        final image = await fgBoundary.toImage(pixelRatio: entry.value / side);
+        try {
+          // Keeps its alpha on purpose: the launcher composites this over the
+          // background colour and masks it to the device's icon shape.
+          final data = await image.toByteData(format: ui.ImageByteFormat.png);
+          final path =
+              'android/app/src/main/res/${entry.key}/ic_launcher_foreground.png';
+          File(path)
+            ..parent.createSync(recursive: true)
+            ..writeAsBytesSync(data!.buffer.asUint8List());
+        } finally {
+          image.dispose();
+        }
       }
     });
 

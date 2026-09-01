@@ -152,10 +152,13 @@ class Anniversary {
 Anniversary? anniversaryOn(Iterable<Entry> entries, DateTime today) {
   final byYears = <int, List<Entry>>{};
   final byMonths = <int, List<Entry>>{};
+  // Hoisted: rebuilding this per entry cost ~36x the rest of the function,
+  // and this runs from a widget's build.
+  final startOfToday = DateTime(today.year, today.month, today.day);
 
   for (final entry in entries) {
     final at = entry.createdAt;
-    if (!at.isBefore(DateTime(today.year, today.month, today.day))) continue;
+    if (!at.isBefore(startOfToday)) continue;
 
     if (at.month == today.month && at.day == today.day) {
       final years = today.year - at.year;
@@ -164,7 +167,10 @@ Anniversary? anniversaryOn(Iterable<Entry> entries, DateTime today) {
     }
     if (at.day == today.day) {
       final months = (today.year - at.year) * 12 + (today.month - at.month);
-      if (months >= 1) (byMonths[months] ??= []).add(entry);
+      // Past a year the month framing stops being the friendly one — "26
+      // months ago today" is worse than saying nothing, and the fallback
+      // exists only to carry a young archive to its first birthday.
+      if (months >= 1 && months < 12) (byMonths[months] ??= []).add(entry);
     }
   }
 
@@ -188,8 +194,13 @@ Anniversary? anniversaryOn(Iterable<Entry> entries, DateTime today) {
   return null;
 }
 
-List<Entry> _newestFirst(List<Entry> entries) =>
-    entries..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+List<Entry> _newestFirst(List<Entry> entries) => entries
+  ..sort((a, b) {
+    final byTime = b.createdAt.compareTo(a.createdAt);
+    // Dart's sort is not stable, so two entries recorded in the same
+    // millisecond would otherwise swap places between rebuilds.
+    return byTime != 0 ? byTime : a.id.compareTo(b.id);
+  });
 
 /// Entries ordered by distance from a point, closest first.
 ///

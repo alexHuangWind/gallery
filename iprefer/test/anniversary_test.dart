@@ -81,6 +81,20 @@ void main() {
       expect(anniversaryOn(entries, today)!.label, '8 months ago today');
     });
 
+    test('stops at a year — "26 months ago today" is worse than silence', () {
+      // The fallback exists to carry a young archive to its first birthday,
+      // not to become the permanent framing.
+      final entries = [at(DateTime(2024, 3, 25))];
+
+      expect(anniversaryOn(entries, today), isNull);
+    });
+
+    test('eleven months still counts', () {
+      final entries = [at(DateTime(2025, 9, 25))];
+
+      expect(anniversaryOn(entries, today)!.label, '11 months ago today');
+    });
+
     test('a year match always beats a month match', () {
       final entries = [
         at(DateTime(2026, 7, 25), text: 'a month ago'),
@@ -128,6 +142,30 @@ void main() {
 
       expect(anniversaryOn(entries, endOfMonth), isNull);
     });
+  });
+
+  test('entries sharing a timestamp keep a stable order between calls', () {
+    final same = DateTime(2025, 8, 25, 12);
+    final entries = [at(same, text: 'one'), at(same, text: 'two')];
+
+    // Dart's sort is not stable; without a tiebreak these swap places
+    // between rebuilds and the banner visibly shuffles.
+    final first = anniversaryOn(entries, today)!.entries.map((e) => e.text);
+    final second = anniversaryOn(entries, today)!.entries.map((e) => e.text);
+
+    expect(first, second);
+  });
+
+  test('a 31st only matches another 31st, never a short month', () {
+    // The case the earlier boundary test meant to cover but didn't: today is
+    // a 31st and there IS an entry on a 31st two months back.
+    final endOfMarch = DateTime(2026, 3, 31);
+    final entries = [at(DateTime(2026, 1, 31)), at(DateTime(2026, 2, 28))];
+
+    final result = anniversaryOn(entries, endOfMarch)!;
+
+    expect(result.label, '2 months ago today');
+    expect(result.entries.length, 1);
   });
 
   test('it composes with the tag filter', () {
