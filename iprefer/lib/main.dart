@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -87,8 +89,16 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
   /// coping with a missing service; it simply reports `enabled == false` for a
   /// guest, which is a supported way to use the app rather than a degraded one.
   late SyncService _sync;
+  bool _initialised = false;
   String? _syncingAs;
   bool _wasSignedIn = false;
+
+  /// Session changes, run strictly one after another.
+  ///
+  /// The sign-out wipe is a Hive write. Fired and forgotten it could still be
+  /// running when a fast re-sign-in reconfigures sync, and land *after* the
+  /// new account had queued its ops — deleting them.
+  Future<void> _sessionWork = Future<void>.value();
 
   @override
   void initState() {
@@ -109,13 +119,29 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
     final signedIn = widget.session.signedIn;
     // Edge-detected: Session notifies on the way in as well as out, and only
     // a sign-*out* should clear anything.
-    if (_wasSignedIn && !signedIn) {
-      _view.reset();
-      // The next account must not inherit this one's queue, cursor, or the
-      // "already adopted" flag.
-      widget.outbox.reset();
-    }
+    final signedOut = _wasSignedIn && !signedIn;
     _wasSignedIn = signedIn;
+    _sessionWork = _sessionWork
+        .then((_) => _applySessionChange(signedOut))
+        .catchError((Object e, StackTrace stack) {
+      // Nothing can await a listener, so without this a failed write here is
+      // an unhandled async error rather than a line in the log.
+      debugPrint('handling a session change failed: $e\n$stack');
+    });
+  }
+
+  Future<void> _applySessionChange(bool signedOut) async {
+    if (signedOut) {
+      _view.reset();
+      // Awaited before anything reconfigures sync: the next account must not
+      // inherit this one's queue or cursor, and must not have its own queue
+      // wiped by a reset that was still in flight. The entries stay on the
+      // phone — see SyncOutbox.reset — and the outbox refuses to offer them
+      // to whoever signs in next.
+      await widget.outbox.reset();
+    }
+    // The state can be gone across that await.
+    if (!mounted) return;
     // The provider hands out this instance, so a swap needs a rebuild.
     if (_configureSync()) setState(() {});
   }
@@ -142,17 +168,27 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
       // sign-in instead of the app retrying a dead token forever.
       onAuthExpired: widget.session.markSyncTokenExpired,
     );
-    if (wanted != null) _syncAfterSignIn();
+    // Read here rather than inside the pass: by the time that runs the person
+    // may already have signed out again.
+    final userId = widget.session.userId;
+    if (wanted != null && userId != null) unawaited(_syncAfterSignIn(userId));
     return true;
   }
 
-  bool _initialised = false;
-
-  Future<void> _syncAfterSignIn() async {
-    // Anything recorded as a guest predates the account and has never been
-    // offered to the server. Adopt it once, then sync normally.
-    await widget.outbox.adoptExisting(widget.store.entries);
-    await _sync.syncNow();
+  Future<void> _syncAfterSignIn(String userId) async {
+    try {
+      // Anything recorded as a guest predates the account and has never been
+      // offered to the server. The outbox decides whether this is that case:
+      // a *second* account on this phone adopts nothing, or it would upload
+      // the first account's archive into the second one's.
+      await widget.outbox.adoptExisting(widget.store.entries, userId: userId);
+      await _sync.syncNow();
+    } catch (e, stack) {
+      // Nobody awaits this pass, so a failed Hive write used to escape as an
+      // unhandled async error. Backing up is best-effort by construction: the
+      // queue is untouched, and the next resume tries the whole thing again.
+      debugPrint('sync after sign-in failed: $e\n$stack');
+    }
   }
 
   @override
