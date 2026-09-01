@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:iprefer/data/entry_store.dart';
@@ -10,6 +12,10 @@ import 'package:path/path.dart' as p;
 /// a real Hive box in a temp dir, a real photos directory. Per the project
 /// rule, they call production methods; nothing here re-implements store logic.
 void main() {
+  // writePhotoBytes talks to PaintingBinding.instance.imageCache, which needs a
+  // binding; these are plain `test`s, so nothing else would have set one up.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late Directory tempDir;
   late Box<Entry> box;
   late String photosRoot;
@@ -203,6 +209,73 @@ void main() {
     });
   });
 
+  group('photo bytes', () {
+    test('writePhotoBytes tells the UI the photo landed', () async {
+      // A downloaded photo that nothing announces is a tile that stays a grey
+      // placeholder until the app restarts — on a second device, that is the
+      // whole visible result of syncing.
+      var notified = 0;
+      store.addListener(() => notified++);
+
+      await store.writePhotoBytes('e1.jpg', Uint8List.fromList([1, 2, 3]));
+
+      expect(File(p.join(photosRoot, 'e1.jpg')).readAsBytesSync(), [1, 2, 3]);
+      expect(notified, 1);
+    });
+
+    test('writePhotoBytes drops the stale image-cache entries', () async {
+      // The failed resolve from when the file was missing lingers in the cache
+      // and is handed to every later resolve of the same key, so the tile keeps
+      // painting the placeholder even once the bytes are here. Both keys have
+      // to go: full-size cards resolve the FileImage, grid tiles the
+      // ResizeImage wrapper around it.
+      final cache = PaintingBinding.instance.imageCache;
+      final provider = FileImage(File(p.join(photosRoot, 'e1.jpg')));
+      final compactKey = await ResizeImage(provider, width: 600)
+          .obtainKey(ImageConfiguration.empty);
+      cache.putIfAbsent(provider, _StuckCompleter.new);
+      cache.putIfAbsent(compactKey, _StuckCompleter.new);
+      expect(cache.containsKey(provider), isTrue);
+      expect(cache.containsKey(compactKey), isTrue);
+
+      await store.writePhotoBytes('e1.jpg', Uint8List.fromList([1]));
+
+      expect(cache.containsKey(provider), isFalse);
+      expect(cache.containsKey(compactKey), isFalse);
+    });
+
+    test('writePhotoBytes creates the photos directory if it is gone',
+        () async {
+      expect(Directory(photosRoot).existsSync(), isFalse);
+
+      await store.writePhotoBytes('e1.jpg', Uint8List.fromList([9]));
+
+      expect(File(p.join(photosRoot, 'e1.jpg')).existsSync(), isTrue);
+    });
+
+    test('readPhotoBytes finds a legacy entry\'s photo by its sync name',
+        () async {
+      // Records written before the name-not-path change hold an absolute path,
+      // so photosRoot/<syncPhotoName> does not exist for them. Returning null
+      // here makes the sync service mark the upload done and drop the photo
+      // for good — silently, for every entry recorded before that change.
+      final legacyDir = Directory(p.join(tempDir.path, 'legacy'))
+        ..createSync(recursive: true);
+      final legacyPhoto = File(p.join(legacyDir.path, 'IMG_0042.JPG'))
+        ..writeAsBytesSync([4, 2]);
+      final entry = entryAt('old-1', localPath: legacyPhoto.path);
+      await store.add(entry);
+
+      expect(await store.readPhotoBytes(entry.syncPhotoName), [4, 2]);
+    });
+
+    test('readPhotoBytes is still null when the file is really gone', () async {
+      await store.add(entryAt('ghost', localPath: 'ghost.jpg'));
+
+      expect(await store.readPhotoBytes('ghost.jpg'), isNull);
+    });
+  });
+
   group('near', () {
     // 0.001° of latitude ≈ 111 m.
     test('filters by radius and returns nearest first', () async {
@@ -225,3 +298,8 @@ void main() {
     });
   });
 }
+
+/// An image that never resolves, standing in for the resolve that *failed*
+/// while the photo was still downloading — both sit in the cache under the same
+/// key, and both make a tile paint the placeholder forever if they survive.
+class _StuckCompleter extends ImageStreamCompleter {}

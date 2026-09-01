@@ -100,20 +100,65 @@ class Entry {
   ///
   /// [localPath] becomes the photo *name*: the file may not be on this device
   /// yet, and the sync service downloads it under exactly that name.
+  ///
+  /// Every cast is soft, for the same reason [EntryAdapter.read]'s are: this
+  /// parses bytes we did not write. The blast radius is worse here, though — a
+  /// throw lands inside the pull loop *before* the cursor advances, so one
+  /// malformed record would make the client re-request that same page forever
+  /// and nothing recorded after it would ever arrive. So: a default wherever a
+  /// default is honest, and [MalformedSyncOp] only for the id, which nothing
+  /// can invent.
   static Entry fromSyncJson(Map<String, Object?> json) {
+    final id = json['id'];
+    if (id is! String || id.isEmpty) throw MalformedSyncOp('id');
+    final photoName = json['photoName'];
+    final text = json['text'];
+    final createdAt = json['createdAt'];
+    final latitude = json['latitude'];
+    final longitude = json['longitude'];
+    final placeLabel = json['placeLabel'];
     final rawTags = json['tags'];
     return Entry(
-      id: json['id']! as String,
-      localPath: (json['photoName'] as String?) ?? '${json['id']}.jpg',
-      text: (json['text'] as String?) ?? '',
-      createdAt:
-          DateTime.fromMillisecondsSinceEpoch((json['createdAt'] as num).toInt()),
-      latitude: (json['latitude'] as num?)?.toDouble(),
-      longitude: (json['longitude'] as num?)?.toDouble(),
-      placeLabel: json['placeLabel'] as String?,
+      id: id,
+      // A name we can derive: the server's own convention is `<id>.<ext>`, so
+      // guessing it keeps the photo download self-healing instead of losing an
+      // entry over a field that only ever restates the id.
+      localPath: photoName is String && photoName.isNotEmpty
+          ? photoName
+          : '$id.jpg',
+      text: text is String ? text : '',
+      // Epoch, not `now`: a record with an unreadable timestamp settles at the
+      // bottom of the timeline instead of jumping to the top of it — and to a
+      // different top — on every sync.
+      createdAt: DateTime.fromMillisecondsSinceEpoch(
+        createdAt is num ? createdAt.toInt() : 0,
+      ),
+      // A coordinate that arrived as a string is not a coordinate. Dropping it
+      // costs a dot on the map; trusting it would put the dot in the wrong
+      // place, which is worse than no dot at all.
+      latitude: latitude is num ? latitude.toDouble() : null,
+      longitude: longitude is num ? longitude.toDouble() : null,
+      placeLabel: placeLabel is String ? placeLabel : null,
       tags: rawTags is List ? rawTags.map((t) => '$t').toList() : const [],
     );
   }
+}
+
+/// A record or op from the server missing a field that has no sane default.
+///
+/// Its own type, and it names the field, so the sync pass can catch exactly
+/// this, log it and skip the one bad op — rather than letting a server bug
+/// stall the pull cursor and freeze sync for the whole account. Anything that
+/// *can* be defaulted is defaulted instead of thrown; see [Entry.fromSyncJson].
+///
+/// Lives beside [Entry.fromSyncJson] rather than in `data/sync/` because
+/// `sync_op.dart` already imports this file and the reverse would be a cycle.
+class MalformedSyncOp extends FormatException {
+  MalformedSyncOp(this.field)
+      : super('malformed sync op: missing or unreadable "$field"');
+
+  /// The wire field that was absent or the wrong shape.
+  final String field;
 }
 
 /// Entries carrying *any* of [tags] (OR), preserving the incoming order.
