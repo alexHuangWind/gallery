@@ -15,11 +15,27 @@ class PullPage {
 }
 
 /// Raised for anything the caller can't fix by retrying differently. The sync
-/// service treats every failure the same way — try again later — so this
-/// carries a message for logs, not a taxonomy.
+/// service treats almost every failure the same way — try again later — so
+/// this carries a message for logs, not a taxonomy.
 class SyncApiException implements Exception {
-  SyncApiException(this.message);
+  SyncApiException(this.message, {this.statusCode});
   final String message;
+
+  /// The HTTP status, when the failure came from a response rather than from
+  /// the socket. Null for offline, DNS, timeout.
+  final int? statusCode;
+
+  /// The server rejected the request itself, not the attempt at it.
+  ///
+  /// The distinction only matters for photos: an upload the server will never
+  /// accept (too big, wrong name) is retried first on every pass, so without
+  /// this it sits at the head of the queue rejecting itself forever and every
+  /// photo behind it stays unbacked-up.
+  bool get isPermanent {
+    final code = statusCode;
+    return code != null && code >= 400 && code < 500;
+  }
+
   @override
   String toString() => 'SyncApiException: $message';
 }
@@ -32,7 +48,8 @@ class SyncApiException implements Exception {
 /// would keep "trying again" forever while quietly not backing anything up —
 /// the archive silently stops being safe and nothing ever says so.
 class SyncAuthExpiredException extends SyncApiException {
-  SyncAuthExpiredException() : super('the sync session has expired');
+  SyncAuthExpiredException()
+      : super('the sync session has expired', statusCode: 401);
 }
 
 /// The server as the app sees it.
@@ -74,7 +91,8 @@ class HttpSyncApi implements SyncApi {
 
   Never _fail(http.BaseResponse res, String what) {
     if (res.statusCode == 401) throw SyncAuthExpiredException();
-    throw SyncApiException('$what failed: HTTP ${res.statusCode}');
+    throw SyncApiException('$what failed: HTTP ${res.statusCode}',
+        statusCode: res.statusCode);
   }
 
   @override

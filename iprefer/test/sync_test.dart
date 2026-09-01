@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -25,6 +26,27 @@ class FakeSyncApi implements SyncApi {
   int pullCalls = 0;
   int pushCalls = 0;
 
+  /// The real server rejects an oversized batch with a 400 rather than
+  /// truncating it (`server/src/validate.ts`).
+  int? maxOpsPerPush;
+
+  /// Fails every push after this many have been accepted — the connection
+  /// dropping partway through a long queue.
+  int? rejectPushAfter;
+
+  /// Photo name -> the status this server always answers with. A 413 is the
+  /// realistic one: a file the server will never accept, however often it is
+  /// offered.
+  final Map<String, int> uploadRejections = {};
+  final List<String> uploadAttempts = [];
+
+  /// Answers every pull with this seq and `hasMore: true` — a server that
+  /// claims there is more but never moves the cursor forward.
+  int? stuckAtSeq;
+
+  /// Holds a pull open, so a test can act (sign out, say) mid-pass.
+  Completer<void>? pullGate;
+
   void _guard() {
     if (expired) throw SyncAuthExpiredException();
     if (offline) throw SyncApiException('offline');
@@ -39,6 +61,13 @@ class FakeSyncApi implements SyncApi {
     // server" is worthless if the counter only increments on success.
     pushCalls++;
     _guard();
+    final cap = maxOpsPerPush;
+    if (cap != null && ops.length > cap) {
+      throw SyncApiException('too many ops', statusCode: 400);
+    }
+    if (rejectPushAfter != null && pushCalls > rejectPushAfter!) {
+      throw SyncApiException('connection dropped');
+    }
     pushes.add(List.of(ops));
     for (final op in ops) {
       final already = log.any((r) => r.op.type == op.type && r.op.entryId == op.entryId);
@@ -50,7 +79,16 @@ class FakeSyncApi implements SyncApi {
   @override
   Future<PullPage> pull({required int since, int limit = 200}) async {
     pullCalls++;
+    if (pullGate != null) await pullGate!.future;
     _guard();
+    final stuck = stuckAtSeq;
+    if (stuck != null) {
+      return PullPage(
+        ops: [RemoteOp(seq: stuck, op: const SyncOp.delete('gone'))],
+        seq: stuck,
+        hasMore: true,
+      );
+    }
     final after = log.where((o) => o.seq > since).toList()
       ..sort((a, b) => a.seq.compareTo(b.seq));
     final page = after.take(limit).toList();
@@ -63,7 +101,12 @@ class FakeSyncApi implements SyncApi {
 
   @override
   Future<void> uploadPhoto(String name, Uint8List bytes) async {
+    uploadAttempts.add(name);
     _guard();
+    final rejected = uploadRejections[name];
+    if (rejected != null) {
+      throw SyncApiException('rejected $name', statusCode: rejected);
+    }
     photos[name] = bytes;
   }
 
@@ -124,6 +167,10 @@ void main() {
         createdAt: when,
         tags: const ['coffee'],
       );
+
+  /// A distinct, well-formed id for the bulk cases.
+  String bulkId(int i) =>
+      '${i.toString().padLeft(8, '0')}-cccc-4ccc-8ccc-cccccccccccc';
 
   Entry remoteEntry(String id, {String text = 'from another phone'}) => Entry(
         id: id,
@@ -324,6 +371,56 @@ void main() {
       expect(api.log.where((r) => r.op.type == SyncOpType.create).length, 1);
       expect(outbox.pending, isEmpty);
     });
+
+    test('a queue bigger than one request still gets through', () async {
+      // The guest case: an archive recorded before there was an account, all
+      // of it adopted at sign-in.
+      for (var i = 0; i < 600; i++) {
+        await outbox.enqueueCreate(remoteEntry(bulkId(i)));
+      }
+      api.maxOpsPerPush = 500; // the server's real cap
+
+      final result = await sync.syncNow();
+
+      // Sent whole, this was a 400 on every pass forever — the archive would
+      // never have been backed up at all.
+      expect(result.ok, isTrue);
+      expect(result.pushed, 600);
+      expect(api.pushCalls, 3, reason: '600 ops in chunks of 250');
+      expect(outbox.pending, isEmpty);
+    });
+
+    test('a chunk is only forgotten after the server acks that chunk',
+        () async {
+      for (var i = 0; i < 400; i++) {
+        await outbox.enqueueCreate(remoteEntry(bulkId(i)));
+      }
+      // Accepts the first chunk, then the session lapses mid-queue.
+      api.rejectPushAfter = 1;
+
+      await sync.syncNow();
+
+      expect(outbox.pending.length, 150,
+          reason: 'the un-acked chunk is still owed, and only that one');
+    });
+
+    test('a failing push no longer blocks the pull', () async {
+      const arrived = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+      await record();
+      api.seedRemote(SyncOp.create(remoteEntry(arrived)));
+      // The server refuses this device's op, every time.
+      api.maxOpsPerPush = 0;
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isFalse, reason: 'the push failure is still surfaced');
+      expect(result.error, isA<SyncApiException>());
+      // The point: one op the server keeps refusing used to mean nothing from
+      // any other device ever arrived again.
+      expect(store.byId(arrived), isNotNull);
+      expect(result.pulled, 1);
+      expect(outbox.pending.length, 1, reason: 'still owed, still queued');
+    });
   });
 
   group('pull', () {
@@ -390,6 +487,66 @@ void main() {
       expect(result.pulled, 5);
       expect(store.entries.length, 5);
       expect(outbox.cursor, 5);
+    });
+
+    test('a page that claims more without advancing stops the loop', () async {
+      // A server answering the same seq to the same question: the cursor can
+      // never move past it (setCursor ignores anything not greater), so
+      // hasMore alone would keep asking until the 1000-round guard.
+      api.stuckAtSeq = 5;
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isTrue);
+      expect(api.pullCalls, lessThanOrEqualTo(2),
+          reason: 'one more request to see the seq stood still, then stop');
+      expect(outbox.cursor, 5);
+    });
+
+    test('an op this build cannot read does not strand the ones behind it',
+        () async {
+      const broken = 'cccccccc-1111-4111-8111-111111111111';
+      const good = 'cccccccc-2222-4222-8222-222222222222';
+      // A create whose payload this build can't turn into an Entry.
+      api.seedRemote(const SyncOp(
+        type: SyncOpType.create,
+        entryId: broken,
+        payload: <String, Object?>{'id': broken},
+      ));
+      api.seedRemote(SyncOp.create(remoteEntry(good)));
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isTrue);
+      expect(store.byId(good), isNotNull, reason: 'the readable op still lands');
+      // The cursor is the part that matters: stuck behind an op that can never
+      // be read, this device would re-fetch and re-fail the same page forever
+      // and never see another change from any device again.
+      expect(outbox.cursor, 2);
+    });
+
+    test('a pass abandoned mid-flight writes nothing after the sign-out',
+        () async {
+      const id = 'cccccccc-3333-4333-8333-333333333333';
+      api.seedRemote(SyncOp.create(remoteEntry(id)));
+      api.pullGate = Completer<void>();
+
+      final pass = sync.syncNow();
+      await pumpEventQueue();
+      expect(api.pullCalls, 1, reason: 'the pass is parked inside the pull');
+
+      // Signing out disposes this service and resets the boxes underneath it,
+      // while the request it is waiting on is still in the air.
+      sync.dispose();
+      api.pullGate!.complete();
+      final result = await pass;
+
+      // Everything below would otherwise have been the previous account's
+      // data landing in the next user's archive.
+      expect(result.pulled, 0);
+      expect(store.byId(id), isNull);
+      expect(outbox.cursor, 0);
+      expect(outbox.lastSyncedAt, isNull);
     });
   });
 
@@ -460,6 +617,59 @@ void main() {
       expect(result.ok, isTrue);
       expect(result.photosUploaded, 0);
       expect(outbox.pendingPhotoUploads, isEmpty);
+    });
+
+    test('a photo the server will never accept stops holding up the rest',
+        () async {
+      final refused = await record(text: 'a photo too big to store');
+      final ordinary = await record(text: 'a flat white');
+      api.uploadRejections[refused.syncPhotoName] = 413;
+
+      final result = await sync.syncNow();
+
+      // The records reached the server; only one photo didn't. Calling that a
+      // failed sync tells the user their backup is broken when it isn't.
+      expect(result.ok, isTrue);
+      expect(result.photosUploaded, 1);
+      expect(api.photos.keys, contains(ordinary.syncPhotoName));
+      expect(outbox.lastSyncedAt, isNotNull);
+      expect(outbox.pendingPhotoUploads, isEmpty);
+
+      await sync.syncNow();
+
+      // Queued, it would be retried first on every pass and every photo behind
+      // it would wait on a rejection that can never resolve.
+      expect(api.uploadAttempts.where((n) => n == refused.syncPhotoName).length,
+          1);
+    });
+
+    test('a photo the server merely fumbled stays queued for next time',
+        () async {
+      final entry = await record();
+      api.uploadRejections[entry.syncPhotoName] = 500;
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isTrue);
+      expect(outbox.pendingPhotoUploads, {entry.syncPhotoName},
+          reason: 'a 500 is the server having a bad day, not refusing the file');
+    });
+
+    test('downloads are bounded per pass, and the rest arrive next time',
+        () async {
+      for (var i = 0; i < 30; i++) {
+        final id = bulkId(i);
+        api.seedRemote(SyncOp.create(remoteEntry(id)));
+        api.photos['$id.jpg'] = Uint8List.fromList([i]);
+      }
+
+      final first = await sync.syncNow();
+      final second = await sync.syncNow();
+
+      // Sequential requests with a 30-second timeout each: unbounded, a fresh
+      // install would hold one pass open for hours.
+      expect(first.photosDownloaded, 25);
+      expect(second.photosDownloaded, 5);
     });
 
     test('a downloaded photo is not fetched again on the next sync', () async {
