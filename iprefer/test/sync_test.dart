@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -8,6 +9,7 @@ import 'package:iprefer/data/sync/sync_api.dart';
 import 'package:iprefer/data/sync/sync_op.dart';
 import 'package:iprefer/data/sync/sync_outbox.dart';
 import 'package:iprefer/data/sync/sync_service.dart';
+import 'package:iprefer/data/sync/sync_validate.dart';
 import 'package:iprefer/models/entry.dart';
 import 'package:path/path.dart' as p;
 
@@ -241,32 +243,49 @@ void main() {
   });
 
   group('adopting a guest archive at sign-in', () {
+    const String accountA = 'apple-user-a';
+    const String accountB = 'apple-user-b';
+
+    /// A store with no outbox behind it — entries recorded as a guest.
+    EntryStore guestArchive() =>
+        EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+
+    /// Signs A in, lets the archive reach the server, then signs out the way
+    /// the app does.
+    Future<void> signInAdoptAndOut(EntryStore archive) async {
+      await outbox.adoptExisting(archive.entries, userId: accountA);
+      await outbox.forget(outbox.pending);
+      for (final name in outbox.pendingPhotoUploads.toList()) {
+        await outbox.markPhotoUploaded(name);
+      }
+      await outbox.reset();
+    }
+
     test('queues entries recorded before there was an account', () async {
-      // Recorded with no outbox at all — the guest case.
-      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+      final guestStore = guestArchive();
       await guestStore.create(
           sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
       await guestStore.create(
           sourcePhotoPath: sourcePhoto('b.jpg').path, text: 'two', createdAt: when);
       expect(outbox.pending, isEmpty);
 
-      await outbox.adoptExisting(guestStore.entries);
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
 
       expect(outbox.pending.length, 2);
       expect(outbox.pendingPhotoUploads.length, 2);
     });
 
     test('runs once, so relaunching never re-uploads the archive', () async {
-      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+      final guestStore = guestArchive();
       final entry = await guestStore.create(
           sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
 
-      await outbox.adoptExisting(guestStore.entries);
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
       await outbox.forget(outbox.pending);
       await outbox.markPhotoUploaded(entry.syncPhotoName);
 
       // Every subsequent launch calls this again.
-      await outbox.adoptExisting(guestStore.entries);
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
 
       expect(outbox.pending, isEmpty,
           reason: 'a second adoption would re-push the whole archive');
@@ -274,16 +293,136 @@ void main() {
           reason: 'and would re-upload every photo, which is the expensive half');
     });
 
-    test('a reset clears the guard so the next account adopts afresh', () async {
-      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+    test('a second account on the same phone adopts nothing', () async {
+      final guestStore = guestArchive();
       await guestStore.create(
           sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
-      await outbox.adoptExisting(guestStore.entries);
+      await signInAdoptAndOut(guestStore);
 
-      await outbox.reset();
-      await outbox.adoptExisting(guestStore.entries);
+      await outbox.adoptExisting(guestStore.entries, userId: accountB);
 
+      // These entries are A's. Adopting them here is how one person's photos
+      // end up in another person's account on a shared or resold phone.
+      expect(outbox.pending, isEmpty);
+      expect(outbox.pendingPhotoUploads, isEmpty);
+      // They stay on the device, though: signing out must not cost anyone
+      // photos that were never backed up.
+      expect(guestStore.entries.length, 1);
+    });
+
+    test('signing back into the same account adopts nothing', () async {
+      final guestStore = guestArchive();
+      await guestStore.create(
+          sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
+      await signInAdoptAndOut(guestStore);
+
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
+
+      // The server already has them; the pull that follows brings back
+      // anything this device is missing.
+      expect(outbox.pending, isEmpty);
+      expect(outbox.pendingPhotoUploads, isEmpty);
+      expect(outbox.accountId, accountA);
+    });
+
+    test('a queue left by the previous account never reaches the next one',
+        () async {
+      final guestStore = guestArchive();
+      await guestStore.create(
+          sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
+      await outbox.setCursor(9);
       expect(outbox.pending.length, 1);
+
+      // No reset in between — a sign-out killed mid-write, or a crash.
+      await outbox.adoptExisting(guestStore.entries, userId: accountB);
+
+      expect(outbox.pending, isEmpty, reason: "those ops are A's");
+      expect(outbox.pendingPhotoUploads, isEmpty);
+      // A's cursor would have made B skip its own log from the start.
+      expect(outbox.cursor, 0);
+      expect(outbox.accountId, accountB);
+    });
+  });
+
+  group('ops the server would reject', () {
+    /// An entry as a torn Hive record reads back: every cast in EntryAdapter
+    /// softens to a default, so a bad row becomes id: '' / text: ''.
+    Entry torn() => Entry(id: '', localPath: '', text: '', createdAt: when);
+
+    test('an unsendable entry is dropped instead of blocking the queue',
+        () async {
+      await outbox.enqueueCreate(torn());
+      // The server 400s a push on its first bad op, so the entry that follows
+      // would never reach it either.
+      final good = await record();
+
+      expect(outbox.pending.map((o) => o.entryId), [good.id]);
+      expect(outbox.pendingPhotoUploads, {good.syncPhotoName});
+    });
+
+    test('an entry with more tags than the server accepts is dropped',
+        () async {
+      final entry = Entry(
+        id: '88888888-8888-4888-8888-888888888888',
+        localPath: '88888888-8888-4888-8888-888888888888.jpg',
+        text: 'a shelf for everything',
+        createdAt: when,
+        // normalizeTags caps each tag's length but never how many there are.
+        tags: [for (var i = 0; i < 40; i++) 'tag$i'],
+      );
+
+      await outbox.enqueueCreate(entry);
+
+      expect(outbox.pending, isEmpty);
+      expect(outbox.pendingPhotoUploads, isEmpty);
+    });
+
+    test('a photo extension the server will not store is dropped', () {
+      final entry = Entry(
+        id: '99999999-9999-4999-8999-999999999999',
+        localPath: '/old/container/Documents/photos/whatever.gif',
+        text: 'a moving picture',
+        createdAt: when,
+      );
+
+      expect(syncOpProblem(SyncOp.create(entry)), isNotNull);
+      expect(syncOpProblem(SyncOp.create(remoteEntry(
+        '99999999-9999-4999-8999-999999999999',
+      ))), isNull);
+    });
+
+    test('an op queued before this check existed is skipped, then swept',
+        () async {
+      // Straight into the box, the way an older build would have written it.
+      final legacyOps = await Hive.openBox('legacy_ops');
+      await legacyOps.put(
+        'create:',
+        jsonEncode({
+          'type': 'create',
+          'entryId': '',
+          'payload': {
+            'id': '',
+            'text': '',
+            'createdAt': when.millisecondsSinceEpoch,
+            'tags': <String>[],
+            'photoName': '.jpg',
+          },
+        }),
+      );
+      final legacy = SyncOutbox.forTest(
+        legacyOps,
+        await Hive.openBox('legacy_meta'),
+        await Hive.openBox('legacy_photos'),
+      );
+
+      expect(legacy.pending, isEmpty,
+          reason: 'sending it would 400 the whole batch, forever');
+
+      // Nothing will ever push it, so nothing would ever forget it — and the
+      // backup line would sit at "1 waiting" for the life of the install.
+      await legacy.forget(const []);
+      expect(legacy.pendingCount, 0);
     });
   });
 
