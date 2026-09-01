@@ -148,6 +148,44 @@ void main() {
   });
 
   group('tags', () {
+    test('a cached read is invalidated by every mutation', () async {
+      // entries/tagCounts/tagsByUse are memoized behind notifyListeners,
+      // because a single frame asks for them several times over. A stale
+      // cache would mean recording something and watching the timeline not
+      // change, so pin the invalidation rather than trusting the plumbing.
+      expect(store.entries, isEmpty);
+      expect(store.tagCounts, isEmpty);
+
+      final first = await store.create(
+        sourcePhotoPath: writeSourcePhoto().path,
+        text: 'a flat white',
+        createdAt: when,
+        tags: const ['coffee'],
+      );
+      expect(store.entries.map((e) => e.id), [first.id]);
+      expect(store.tagCounts, {'coffee': 1});
+      expect(store.tagsByUse, ['coffee']);
+
+      await store.delete(first.id);
+      expect(store.entries, isEmpty);
+      expect(store.tagCounts, isEmpty);
+      expect(store.tagsByUse, isEmpty);
+    });
+
+    test('the cached lists are not the caller\'s to mutate', () async {
+      // Callers used to get a fresh copy they could safely sort in place, and
+      // now they share one. Unmodifiable so that stops being silent.
+      await store.create(
+        sourcePhotoPath: writeSourcePhoto().path,
+        text: 'one',
+        createdAt: when,
+      );
+
+      expect(() => store.entries.removeAt(0), throwsUnsupportedError);
+      expect(() => store.tagsByUse.add('x'), throwsUnsupportedError);
+      expect(() => store.tagCounts['x'] = 1, throwsUnsupportedError);
+    });
+
     test('tagCounts counts entries per tag', () async {
       await store.add(entryAt('a', tags: const ['wine']));
       await store.add(entryAt('b', tags: const ['wine', 'dish']));
