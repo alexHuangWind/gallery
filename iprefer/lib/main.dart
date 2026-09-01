@@ -156,8 +156,9 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
     if (_syncingAs == wanted && _initialised) return false;
 
     _syncingAs = wanted;
-    // Safe even mid-pass: SyncService guards its own notifications after
-    // disposal, so an in-flight sync's `finally` can no longer throw.
+    // Safe even mid-pass: dispose bumps the service's generation, so an
+    // in-flight pass stops writing after its next await instead of landing the
+    // previous account's records in this one's archive.
     if (_initialised) _sync.dispose();
     _initialised = true;
     _sync = SyncService(

@@ -116,7 +116,9 @@ class SyncService extends ChangeNotifier {
   bool get needsReauth => _needsReauth;
 
   /// Pending local changes, for a "not backed up yet" hint in the UI.
-  int get pendingCount => _outbox.pending.length;
+  // The outbox's own count, not `pending.length`: `pending` JSON-decodes every
+  // row, and the backup line reads this from build on every keystroke.
+  int get pendingCount => _outbox.pendingCount;
 
   /// Only ever read from inside a pass that [syncNow] has already gated on
   /// `_api != null`. A final field can't be promoted across method calls, so

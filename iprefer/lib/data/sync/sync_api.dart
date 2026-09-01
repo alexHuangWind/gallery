@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
 import 'sync_op.dart';
@@ -120,10 +121,20 @@ class HttpSyncApi implements SyncApi {
     if (res.statusCode != 200) _fail(res, 'pull');
     final body = jsonDecode(res.body) as Map<String, Object?>;
     final raw = (body['ops'] as List?) ?? const [];
+    // One op that cannot be parsed must not fail the page. This runs inside
+    // pull(), *before* the service's per-op guard in _apply, so a throw here
+    // would escape as a failed pass — and the cursor would stall on this page
+    // forever, which is the exact failure MalformedSyncOp exists to avoid.
+    final ops = <RemoteOp>[];
+    for (final o in raw) {
+      try {
+        ops.add(RemoteOp.fromJson((o as Map).cast<String, Object?>()));
+      } catch (e) {
+        debugPrint('pull: skipping an unreadable op ($e)');
+      }
+    }
     return PullPage(
-      ops: [
-        for (final o in raw) RemoteOp.fromJson((o as Map).cast<String, Object?>()),
-      ],
+      ops: ops,
       seq: (body['seq'] as num?)?.toInt() ?? since,
       hasMore: body['hasMore'] == true,
     );
