@@ -137,6 +137,67 @@ void main() {
       }
     });
 
+    // The FAB belongs to this family too, but it has no surfaceTintColor to
+    // pin — see the next test for the fill that stands in its place.
+    test('the FAB is the filled button in another posture', () {
+      // Unthemed it takes colorScheme.primaryContainer — the seed's warm brown
+      // — on the one control that floats over every photo in the timeline.
+      // There is no surfaceTintColor to pin here: FloatingActionButton paints
+      // its fill through RawMaterialButton and never washes it with
+      // colorScheme.surfaceTint, so the fill below is the whole of it.
+      for (final (theme, colors) in [
+        (AppTheme.light(), AppColors.light),
+        (AppTheme.dark(), AppColors.dark),
+      ]) {
+        final fab = theme.floatingActionButtonTheme;
+        expect(fab.backgroundColor, colors.ink);
+        expect(fab.foregroundColor, colors.paper);
+        expect(fab.backgroundColor, isNot(theme.colorScheme.primaryContainer));
+        // 8dp like every other button here; the default is a stadium pill,
+        // and pills mean "selectable filter" everywhere else in this app.
+        expect(
+          fab.shape,
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        );
+      }
+    });
+
+    testWidgets('and a bare FAB actually paints in it', (tester) async {
+      // The call site raises `FloatingActionButton.extended` with no colours
+      // now, so the assertions above are only worth something if the theme is
+      // what the button reads.
+      for (final (theme, colors) in [
+        (AppTheme.light(), AppColors.light),
+        (AppTheme.dark(), AppColors.dark),
+      ]) {
+        await tester.pumpWidget(MaterialApp(
+          // Keyed, so the second pass builds a new app rather than crossfading
+          // into the dark theme over 200 ms and being read mid-lerp.
+          key: ValueKey(theme.brightness),
+          theme: theme,
+          home: Scaffold(
+            floatingActionButton: FloatingActionButton.extended(
+              onPressed: () {},
+              icon: const Icon(Icons.add),
+              label: const Text('record'),
+            ),
+          ),
+        ));
+
+        final button = tester.widget<RawMaterialButton>(
+          find.descendant(
+            of: find.byType(FloatingActionButton),
+            matching: find.byType(RawMaterialButton),
+          ),
+        );
+        expect(button.fillColor, colors.ink);
+        expect(
+          button.shape,
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        );
+      }
+    });
+
     test('the app bar never tints itself', () {
       // elevation: 0 does not stop M3 re-elevating the bar to 3.0 when content
       // scrolls under it and washing it with colorScheme.surfaceTint — a warm

@@ -288,6 +288,46 @@ void main() {
     await drain(tester);
   });
 
+  testWidgets('the system back button closes search, not the app',
+      (tester) async {
+    // The shell is the root route: with the field open and nothing above it to
+    // pop, Android's back gesture used to leave the app — losing the timeline
+    // to close a search box.
+    await seedThree(tester);
+    await pump(tester);
+    await openSearch(tester);
+    await type(tester, 'ferns');
+
+    // By predicate rather than byType: PopScope is generic and the shell lets
+    // its type argument be inferred, so naming a Type here would be asserting
+    // about inference rather than about back.
+    bool canPop() => tester
+        .widgetList(find.descendant(
+          of: find.byType(HomeShell),
+          matching: find.byWidgetPredicate((w) => w is PopScope),
+        ))
+        .whereType<PopScope>()
+        .single
+        .canPop;
+
+    // The claim the gesture rests on: while searching, back is ours to answer.
+    expect(canPop(), isFalse);
+
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+
+    // Exactly what the back arrow does — and the shell is still standing.
+    expect(view.query, '');
+    expect(find.byType(TextField), findsNothing);
+    expect(title('I prefer'), findsOneWidget);
+    expect(find.text('the smell of rain on hot concrete'), findsOneWidget);
+    // With search closed the route is poppable again, so back means "leave"
+    // and the system handles it — this shell must not swallow it.
+    expect(canPop(), isTrue);
+
+    await drain(tester);
+  });
+
   testWidgets('the query survives a tab switch', (tester) async {
     // This is what makes the query shared state rather than the timeline's:
     // the map has to stay narrowed to the same thing.
