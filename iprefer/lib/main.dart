@@ -43,14 +43,19 @@ class _StartupFailed extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
-      home: const Scaffold(
-        body: Center(
-          child: Padding(
-            padding: EdgeInsets.all(40),
-            child: Text(
-              "couldn't open your archive.\nrestarting may help.",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.muted, height: 1.5),
+      darkTheme: AppTheme.dark(),
+      home: Scaffold(
+        // Builder, so `context.colors` resolves against the MaterialApp's own
+        // theme rather than the (theme-less) context this widget was built in.
+        body: Builder(
+          builder: (context) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Text(
+                "couldn't open your archive.\nrestarting may help.",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.colors.muted, height: 1.5),
+              ),
             ),
           ),
         ),
@@ -182,6 +187,9 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
         title: 'I prefer',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
+        // Follows the system appearance. The palette is the same paper/ink
+        // relationship inverted — see AppColors.dark.
+        darkTheme: AppTheme.dark(),
         home: const _Root(),
       ),
     );

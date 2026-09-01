@@ -6,72 +6,210 @@ import 'package:intl/intl.dart' show DateFormat;
 String quietDate(DateTime date) =>
     DateFormat('MMM d, yyyy').format(date).toLowerCase();
 
-/// Quiet, paper-and-ink palette. The app chrome stays out of the way; all the
-/// color lives in the photo.
+/// The app's semantic colours, resolved per theme.
+///
+/// A [ThemeExtension] rather than static constants because the same names have
+/// to mean different values in the dark. Widgets read them through
+/// `context.colors`, so nothing has to know which theme is running.
+@immutable
+class AppColors extends ThemeExtension<AppColors> {
+  const AppColors({
+    required this.ink,
+    required this.paper,
+    required this.muted,
+    required this.mutedText,
+    required this.placeholder,
+    required this.accentInk,
+    required this.danger,
+  });
+
+  /// Primary text, and the fill of a primary button.
+  final Color ink;
+
+  /// The ground everything sits on.
+  final Color paper;
+
+  /// Short labels, dates, chip borders. Deliberately low-contrast.
+  final Color muted;
+
+  /// Body-length supporting copy, where [muted] would fail WCAG AA.
+  final Color mutedText;
+
+  /// Stands in wherever a photo should be but isn't. A tone of [paper], not
+  /// grey, so broken never looks alarming.
+  final Color placeholder;
+
+  /// For the rare line that must be noticed without being alarming — a lapsed
+  /// backup is something to attend to, not an error.
+  final Color accentInk;
+
+  /// The one colour allowed in from outside the palette: destructive actions.
+  final Color danger;
+
+  /// Paper and ink. `muted` measures ~3.4:1 on paper — fine for short labels,
+  /// below AA for reading copy, which is what `mutedText` (~4.6:1) is for.
+  static const light = AppColors(
+    ink: Color(0xFF1A1A1A),
+    paper: Color(0xFFFAF8F4),
+    muted: Color(0xFF8A8580),
+    mutedText: Color(0xFF6E6A64),
+    placeholder: Color(0xFFEDEAE3),
+    accentInk: Color(0xFF7A5C3E),
+    danger: Color(0xFFB3261E),
+  );
+
+  /// Not an inversion — each value was re-picked against the dark ground.
+  ///
+  /// The ground is a warm near-black rather than pure black, so it reads as
+  /// unlit paper rather than a void, and so the photos (which are the only
+  /// real colour in the app) sit on something that doesn't fight them.
+  /// Contrast on that ground: `mutedText` ~9:1, `muted` ~6:1 — both clear the
+  /// bar their light counterparts only just meet.
+  static const dark = AppColors(
+    ink: Color(0xFFF2EFE8),
+    paper: Color(0xFF141311),
+    muted: Color(0xFF9A9389),
+    mutedText: Color(0xFFBDB6AA),
+    placeholder: Color(0xFF211F1B),
+    accentInk: Color(0xFFC9A377),
+    danger: Color(0xFFE8877E),
+  );
+
+  @override
+  AppColors copyWith({
+    Color? ink,
+    Color? paper,
+    Color? muted,
+    Color? mutedText,
+    Color? placeholder,
+    Color? accentInk,
+    Color? danger,
+  }) =>
+      AppColors(
+        ink: ink ?? this.ink,
+        paper: paper ?? this.paper,
+        muted: muted ?? this.muted,
+        mutedText: mutedText ?? this.mutedText,
+        placeholder: placeholder ?? this.placeholder,
+        accentInk: accentInk ?? this.accentInk,
+        danger: danger ?? this.danger,
+      );
+
+  @override
+  AppColors lerp(AppColors? other, double t) {
+    if (other == null) return this;
+    return AppColors(
+      ink: Color.lerp(ink, other.ink, t)!,
+      paper: Color.lerp(paper, other.paper, t)!,
+      muted: Color.lerp(muted, other.muted, t)!,
+      mutedText: Color.lerp(mutedText, other.mutedText, t)!,
+      placeholder: Color.lerp(placeholder, other.placeholder, t)!,
+      accentInk: Color.lerp(accentInk, other.accentInk, t)!,
+      danger: Color.lerp(danger, other.danger, t)!,
+    );
+  }
+
+  // ThemeData compares its extensions with mapEquals, i.e. by ==. Without
+  // these, two equal palettes are equal only when they happen to be the same
+  // canonicalised const — which stops being true the moment one is built by
+  // copyWith or lerp.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AppColors &&
+          other.ink == ink &&
+          other.paper == paper &&
+          other.muted == muted &&
+          other.mutedText == mutedText &&
+          other.placeholder == placeholder &&
+          other.accentInk == accentInk &&
+          other.danger == danger;
+
+  @override
+  int get hashCode =>
+      Object.hash(ink, paper, muted, mutedText, placeholder, accentInk, danger);
+}
+
+extension AppColorsOf on BuildContext {
+  /// The palette for whichever theme is running.
+  ///
+  /// A context above the app's own [MaterialApp] has no palette to read. That
+  /// would render light chrome on a dark phone, so it asserts in debug rather
+  /// than degrading quietly; release keeps the fallback, because a wrong
+  /// colour is still better than a crash.
+  AppColors get colors {
+    final found = Theme.of(this).extension<AppColors>();
+    assert(
+      found != null,
+      'no AppColors in scope — this context is above the MaterialApp that '
+      'supplies the theme. Read the palette below it (a Builder is enough).',
+    );
+    return found ?? AppColors.light;
+  }
+}
+
+/// Quiet, paper-and-ink chrome. All the colour lives in the photo.
 class AppTheme {
   static const String serif = 'PlayfairDisplay';
 
-  static const Color ink = Color(0xFF1A1A1A);
-  static const Color paper = Color(0xFFFAF8F4);
-  static const Color muted = Color(0xFF8A8580);
+  // Built once. ThemeData is immutable, and the navigation-bar theme below
+  // creates fresh resolver closures on every call — which never compare equal,
+  // so a rebuilt theme made MaterialApp's AnimatedTheme restart a 200 ms
+  // crossfade on every root rebuild, between two identical palettes.
+  static final ThemeData _light = _build(AppColors.light, Brightness.light);
+  static final ThemeData _dark = _build(AppColors.dark, Brightness.dark);
 
-  /// Stands in wherever a photo should be but isn't — empty compose slot,
-  /// failed decode. A tone of [paper], not grey, so broken never looks alarming.
-  static const Color placeholder = Color(0xFFEDEAE3);
+  static ThemeData light() => _light;
+  static ThemeData dark() => _dark;
 
-  /// [muted] measures ~3.4:1 on [paper] — fine for short labels and dates,
-  /// below WCAG AA for body-length reading copy. This darker cut (~4.6:1) is
-  /// for multi-line supporting text: the login subhead, empty-state bodies.
-  static const Color mutedText = Color(0xFF6E6A64);
-
-  /// For the rare line that must be noticed without being alarming — a lapsed
-  /// backup is not an error, it is something to attend to. Darker and warmer
-  /// than [muted], well short of [danger].
-  static const Color accentInk = Color(0xFF7A5C3E);
-
-  /// The one color allowed in from outside the palette: destructive actions.
-  /// Named and chosen — never ColorScheme.error, which is derived from the
-  /// seed and would be an accidental tone like the chrome leaks this theme
-  /// exists to prevent.
-  static const Color danger = Color(0xFFB3261E);
-
-  static ThemeData light() {
+  static ThemeData _build(AppColors c, Brightness brightness) {
     final base = ThemeData(
       useMaterial3: true,
+      brightness: brightness,
       colorScheme: ColorScheme.fromSeed(
         seedColor: const Color(0xFF6B5B4A),
-        brightness: Brightness.light,
-        surface: paper,
+        brightness: brightness,
+        surface: c.paper,
       ),
-      scaffoldBackgroundColor: paper,
+      scaffoldBackgroundColor: c.paper,
     );
 
     return base.copyWith(
+      extensions: [c],
       textTheme: base.textTheme.copyWith(
-        displaySmall: const TextStyle(
+        displaySmall: TextStyle(
           fontFamily: serif,
           fontStyle: FontStyle.italic,
           fontSize: 30,
-          color: ink,
+          color: c.ink,
         ),
-        headlineSmall: const TextStyle(
+        headlineSmall: TextStyle(
           fontFamily: serif,
           fontSize: 22,
-          color: ink,
+          color: c.ink,
         ),
-        bodyLarge: const TextStyle(fontSize: 16, color: ink, height: 1.4),
-        bodyMedium: TextStyle(fontSize: 14, color: ink.withValues(alpha: 0.8)),
+        bodyLarge: TextStyle(fontSize: 16, color: c.ink, height: 1.4),
+        bodyMedium: TextStyle(fontSize: 14, color: c.ink.withValues(alpha: 0.8)),
       ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: paper,
-        foregroundColor: ink,
+      appBarTheme: AppBarTheme(
+        backgroundColor: c.paper,
+        foregroundColor: c.ink,
         elevation: 0,
+        // elevation: 0 is not enough. M3 re-elevates the bar to 3.0 the moment
+        // content scrolls under it and tints it with colorScheme.surfaceTint —
+        // a warm brown this palette never chose. The timeline and compose both
+        // scroll, so without these two the bar becomes a coloured band over a
+        // neutral page on every scroll.
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         centerTitle: false,
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: ink,
-          foregroundColor: paper,
+          // Inverted in the dark, as it should be: a light button on a dark
+          // ground is the same gesture as a dark one on paper.
+          backgroundColor: c.ink,
+          foregroundColor: c.paper,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
@@ -81,55 +219,63 @@ class AppTheme {
       // them up — an accent this palette never chose. Ink and muted only.
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: ink,
-          side: BorderSide(color: ink.withValues(alpha: 0.35)),
+          foregroundColor: c.ink,
+          side: BorderSide(color: c.ink.withValues(alpha: 0.35)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: ink),
+        style: TextButton.styleFrom(foregroundColor: c.ink),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: paper,
+        backgroundColor: c.paper,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        indicatorColor: ink.withValues(alpha: 0.08),
+        indicatorColor: c.ink.withValues(alpha: 0.08),
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
-            color: states.contains(WidgetState.selected) ? ink : muted,
+            color: states.contains(WidgetState.selected) ? c.ink : c.muted,
           ),
         ),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
             fontSize: 12,
-            color: states.contains(WidgetState.selected) ? ink : muted,
+            color: states.contains(WidgetState.selected) ? c.ink : c.muted,
           ),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: muted.withValues(alpha: 0.35)),
+          borderSide: BorderSide(color: c.muted.withValues(alpha: 0.35)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: muted.withValues(alpha: 0.35)),
+          borderSide: BorderSide(color: c.muted.withValues(alpha: 0.35)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: ink, width: 1.4),
+          borderSide: BorderSide(color: c.ink, width: 1.4),
         ),
-        hintStyle: const TextStyle(color: muted),
+        hintStyle: TextStyle(color: c.muted),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: c.paper,
+        surfaceTintColor: Colors.transparent,
+      ),
+      listTileTheme: ListTileThemeData(
+        iconColor: c.ink,
+        textColor: c.ink,
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: paper,
+        backgroundColor: c.paper,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      snackBarTheme: const SnackBarThemeData(
-        backgroundColor: ink,
-        contentTextStyle: TextStyle(color: paper, fontSize: 14),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: c.ink,
+        contentTextStyle: TextStyle(color: c.paper, fontSize: 14),
       ),
     );
   }

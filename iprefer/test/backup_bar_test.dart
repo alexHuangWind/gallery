@@ -12,6 +12,7 @@ import 'package:iprefer/data/sync/sync_op.dart';
 import 'package:iprefer/data/sync/sync_outbox.dart';
 import 'package:iprefer/data/sync/sync_service.dart';
 import 'package:iprefer/models/entry.dart';
+import 'package:iprefer/theme.dart';
 import 'package:iprefer/widgets/backup_bar.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
@@ -110,7 +111,12 @@ void main() {
           ChangeNotifierProvider<Session>.value(value: session),
           ChangeNotifierProvider<SyncService>.value(value: sync),
         ],
-        child: const MaterialApp(home: Scaffold(body: BackupBar())),
+        // The real theme, so the bar's colours resolve the way they do in
+        // the app rather than through AppColors' release-only fallback.
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(body: BackupBar()),
+        ),
       ),
     );
   }

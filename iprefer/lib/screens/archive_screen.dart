@@ -100,15 +100,18 @@ class _ArchiveTile extends StatelessWidget {
   Future<void> _confirmDelete(BuildContext context) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      // The dialog's own context, not the tile's: the tile can be unmounted
+      // under an open dialog (a sync pull removing that entry), and the next
+      // rebuild would then read the theme off a defunct element.
+      builder: (ctx) => AlertDialog(
         title: const Text('remove this?'),
         content: const Text('this entry leaves your timeline for good.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('keep')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('keep')),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(ctx, true),
             // The only irreversible choice in the app gets the only red.
-            style: TextButton.styleFrom(foregroundColor: AppTheme.danger),
+            style: TextButton.styleFrom(foregroundColor: ctx.colors.danger),
             child: const Text('remove'),
           ),
         ],
@@ -139,8 +142,8 @@ class _ArchiveTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
-        splashColor: AppTheme.ink.withValues(alpha: 0.06),
-        highlightColor: AppTheme.ink.withValues(alpha: 0.04),
+        splashColor: context.colors.ink.withValues(alpha: 0.06),
+        highlightColor: context.colors.ink.withValues(alpha: 0.04),
         onTap: () => _open(context),
         onLongPress: () => _confirmDelete(context),
         child: PreferenceCard(
@@ -168,20 +171,20 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'nothing here yet',
               style: TextStyle(
                 fontFamily: AppTheme.serif,
                 fontStyle: FontStyle.italic,
                 fontSize: 26,
-                color: AppTheme.ink,
+                color: context.colors.ink,
               ),
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'photograph one small thing you like.\nstart the record.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.mutedText, height: 1.5),
+              style: TextStyle(color: context.colors.mutedText, height: 1.5),
             ),
             const SizedBox(height: 24),
             FilledButton(onPressed: onStart, child: const Text('record the first one')),

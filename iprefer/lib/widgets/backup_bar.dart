@@ -66,14 +66,14 @@ class _BackupBarState extends State<BackupBar> {
           Icon(
             expired ? Icons.cloud_off_outlined : Icons.cloud_done_outlined,
             size: 14,
-            color: expired ? AppTheme.accentInk : AppTheme.muted,
+            color: expired ? context.colors.accentInk : context.colors.muted,
           ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               _message(sync, expired),
               style: TextStyle(
-                color: expired ? AppTheme.accentInk : AppTheme.muted,
+                color: expired ? context.colors.accentInk : context.colors.muted,
                 fontSize: 11,
               ),
               overflow: TextOverflow.ellipsis,

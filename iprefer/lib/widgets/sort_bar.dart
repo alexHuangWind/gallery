@@ -21,9 +21,9 @@ class SortBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: Row(
         children: [
-          const Text(
+          Text(
             'sorted by',
-            style: TextStyle(color: AppTheme.muted, fontSize: 12),
+            style: TextStyle(color: context.colors.muted, fontSize: 12),
           ),
           const SizedBox(width: 10),
           _Option(
@@ -55,17 +55,17 @@ class _NearestStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(color: AppTheme.muted, fontSize: 11);
+    final style = TextStyle(color: context.colors.muted, fontSize: 11);
 
     if (view.locating) {
-      return const Row(
+      return Row(
         children: [
-          SizedBox(
+          const SizedBox(
             width: 11,
             height: 11,
             child: CircularProgressIndicator(strokeWidth: 1.4),
           ),
-          SizedBox(width: 8),
+          const SizedBox(width: 8),
           Flexible(child: Text('finding you', style: style)),
         ],
       );
@@ -74,7 +74,7 @@ class _NearestStatus extends StatelessWidget {
     if (view.originUnavailable) {
       return Row(
         children: [
-          const Flexible(
+          Flexible(
             child: Text('needs your location',
                 style: style, overflow: TextOverflow.ellipsis),
           ),
@@ -121,17 +121,17 @@ class _Option extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.ink : Colors.transparent,
+          color: selected ? context.colors.ink : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? AppTheme.ink : AppTheme.muted.withValues(alpha: 0.35),
+            color: selected ? context.colors.ink : context.colors.muted.withValues(alpha: 0.35),
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 12,
-            color: selected ? AppTheme.paper : AppTheme.ink,
+            color: selected ? context.colors.paper : context.colors.ink,
           ),
         ),
       ),

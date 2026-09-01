@@ -62,9 +62,9 @@ class _TagInputState extends State<TagInput> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'what kind of thing is it?',
-          style: TextStyle(color: AppTheme.muted, fontSize: 13),
+          style: TextStyle(color: context.colors.muted, fontSize: 13),
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -162,19 +162,19 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = selected ? AppTheme.paper : AppTheme.ink;
+    final fg = selected ? context.colors.paper : context.colors.ink;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.ink : Colors.transparent,
+          color: selected ? context.colors.ink : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: selected
-                ? AppTheme.ink
-                : AppTheme.muted.withValues(alpha: dashed ? 0.5 : 0.35),
+                ? context.colors.ink
+                : context.colors.muted.withValues(alpha: dashed ? 0.5 : 0.35),
           ),
         ),
         child: Row(

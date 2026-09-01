@@ -223,7 +223,12 @@ class _EntryPin extends StatelessWidget {
           fit: BoxFit.cover,
           // The pin is 54 pt; decoding beyond ~3x that is pure memory waste.
           cacheWidth: 162,
-          errorBuilder: (_, __, ___) => Container(color: AppTheme.muted),
+          // Fixed, like the white border and the shadow above it: the pin
+          // sits on OSM tiles, which are always the light raster set. Reading
+          // the palette here would give two phones different pins for the
+          // same missing photo.
+          errorBuilder: (_, __, ___) =>
+              const ColoredBox(color: Color(0xFF8A8580)),
         ),
       ),
     );
@@ -266,11 +271,11 @@ class _MapEmptyState extends StatelessWidget {
           children: [
             Text(
               filtered ? 'nothing under that, here' : 'no places yet',
-              style: const TextStyle(
+              style: TextStyle(
                 fontFamily: AppTheme.serif,
                 fontStyle: FontStyle.italic,
                 fontSize: 26,
-                color: AppTheme.ink,
+                color: context.colors.ink,
               ),
             ),
             const SizedBox(height: 12),
@@ -279,7 +284,7 @@ class _MapEmptyState extends StatelessWidget {
                   ? 'no tagged entries have a place yet.'
                   : 'record something while you are out,\nand it will land here.',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.mutedText, height: 1.5),
+              style: TextStyle(color: context.colors.mutedText, height: 1.5),
             ),
           ],
         ),

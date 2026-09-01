@@ -88,7 +88,7 @@ class _OnThisDayState extends State<OnThisDay> with WidgetsBindingObserver {
         children: [
           Row(
             children: [
-              const Icon(Icons.history, size: 15, color: AppTheme.muted),
+              Icon(Icons.history, size: 15, color: context.colors.muted),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -97,12 +97,12 @@ class _OnThisDayState extends State<OnThisDay> with WidgetsBindingObserver {
                     fontFamily: AppTheme.serif,
                     fontStyle: FontStyle.italic,
                     fontSize: 16,
-                    color: AppTheme.ink.withValues(alpha: 0.9),
+                    color: context.colors.ink.withValues(alpha: 0.9),
                   ),
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.close, size: 16, color: AppTheme.muted),
+                icon: Icon(Icons.close, size: 16, color: context.colors.muted),
                 constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 padding: EdgeInsets.zero,
                 tooltip: 'dismiss',

@@ -38,10 +38,10 @@ class EntryChip extends StatelessWidget {
                 // Painted at 64pt; capping the decode near 3x that keeps a
                 // full-resolution photo out of the image cache.
                 cacheWidth: 200,
-                errorBuilder: (_, __, ___) => Container(
+                errorBuilder: (context, _, __) => Container(
                   width: 64,
                   height: 114,
-                  color: AppTheme.placeholder,
+                  color: context.colors.placeholder,
                 ),
               ),
             ),
@@ -54,17 +54,17 @@ class EntryChip extends StatelessWidget {
                     entry.text,
                     maxLines: 4,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: AppTheme.serif,
                       fontSize: 14,
                       height: 1.25,
-                      color: AppTheme.ink,
+                      color: context.colors.ink,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     quietDate(entry.createdAt),
-                    style: const TextStyle(fontSize: 10, color: AppTheme.muted),
+                    style: TextStyle(fontSize: 10, color: context.colors.muted),
                   ),
                 ],
               ),

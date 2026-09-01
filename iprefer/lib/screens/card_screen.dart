@@ -194,13 +194,13 @@ class _CardScreenState extends State<CardScreen> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: AppTheme.muted.withValues(alpha: 0.35),
+                            color: context.colors.muted.withValues(alpha: 0.35),
                           ),
                         ),
                         child: Text(
                           tag,
-                          style: const TextStyle(
-                              fontSize: 12, color: AppTheme.muted),
+                          style: TextStyle(
+                              fontSize: 12, color: context.colors.muted),
                         ),
                       ),
                   ],
@@ -213,13 +213,15 @@ class _CardScreenState extends State<CardScreen> {
                   if (canSave) ...[
                     Expanded(
                       child: FilledButton(
-                        onPressed: _busy ? null : _save,
-                        // The habit's payoff moment must visibly respond: the
-                        // copy+write takes real time, and a silently disabled
-                        // button reads as a dead tap. Height matches the plain
-                        // label, so nothing reflows.
+                        // Stays live while it works. A disabled M3 button
+                        // drops the theme's ink fill for onSurface@0.12, which
+                        // puts the paper spinner at ~1.3:1 on its own button —
+                        // the payoff moment would show a blank grey slab. The
+                        // re-entry guard lives in _save itself. Height matches
+                        // the plain label, so nothing reflows.
+                        onPressed: _save,
                         child: _busy
-                            ? const Row(
+                            ? Row(
                                 mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
@@ -228,10 +230,10 @@ class _CardScreenState extends State<CardScreen> {
                                     height: 14,
                                     child: CircularProgressIndicator(
                                         strokeWidth: 1.6,
-                                        color: AppTheme.paper),
+                                        color: context.colors.paper),
                                   ),
-                                  SizedBox(width: 8),
-                                  Text('saving'),
+                                  const SizedBox(width: 8),
+                                  const Text('saving'),
                                 ],
                               )
                             : const Text('save'),

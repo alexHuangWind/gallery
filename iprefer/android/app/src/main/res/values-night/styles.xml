@@ -3,7 +3,10 @@
     <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
+    <!-- Same reason as the light side: the parent's colorBackground is pure
+         black, not AppColors.dark.paper. -->
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:colorBackground">@color/launch_background</item>
     </style>
 </resources>

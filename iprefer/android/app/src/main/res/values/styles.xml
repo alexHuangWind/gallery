@@ -4,8 +4,11 @@
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
-    <!-- Theme applied once Flutter draws its first frame. -->
+    <!-- Theme applied once Flutter draws its first frame. colorBackground is
+         overridden because the parent theme's is pure white, which shows
+         through transitions and overscroll as a colour the app never uses. -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:colorBackground">@color/launch_background</item>
     </style>
 </resources>

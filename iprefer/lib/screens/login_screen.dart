@@ -57,20 +57,20 @@ class _LoginScreenState extends State<LoginScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 48),
-              const Text(
+              Text(
                 'I prefer',
                 style: TextStyle(
                   fontFamily: AppTheme.serif,
                   fontStyle: FontStyle.italic,
                   fontSize: 44,
-                  color: AppTheme.ink,
+                  color: context.colors.ink,
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'a quiet record of the things you like.\none photo, one line, at a time.',
                 style: TextStyle(
-                    color: AppTheme.mutedText, fontSize: 16, height: 1.5),
+                    color: context.colors.mutedText, fontSize: 16, height: 1.5),
               ),
               const Spacer(),
               if (syncConfigured) ...[
@@ -79,11 +79,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   text: 'sign in with apple',
                   height: 48,
                   borderRadius: BorderRadius.circular(8),
+                  // Apple's HIG: the black button disappears into a dark
+                  // ground. This is the one control whose appearance Apple
+                  // dictates, so it flips rather than following our palette.
+                  style: Theme.of(context).brightness == Brightness.dark
+                      ? SignInWithAppleButtonStyle.white
+                      : SignInWithAppleButtonStyle.black,
                 ),
                 const SizedBox(height: 10),
-                const Text(
+                Text(
                   'keeps your archive if you lose or change your phone.',
-                  style: TextStyle(color: AppTheme.mutedText, fontSize: 12),
+                  style: TextStyle(color: context.colors.mutedText, fontSize: 12),
                 ),
                 const SizedBox(height: 18),
               ],
@@ -109,7 +115,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 syncConfigured
                     ? 'without an account everything stays on this phone.'
                     : 'no account needed for now.',
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                style: TextStyle(color: context.colors.muted, fontSize: 12),
               ),
             ],
           ),

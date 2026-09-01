@@ -92,7 +92,7 @@ class _NearbyRecallState extends State<NearbyRecall>
         children: [
           Row(
             children: [
-              const Icon(Icons.place_outlined, size: 15, color: AppTheme.muted),
+              Icon(Icons.place_outlined, size: 15, color: context.colors.muted),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -103,12 +103,12 @@ class _NearbyRecallState extends State<NearbyRecall>
                     fontFamily: AppTheme.serif,
                     fontStyle: FontStyle.italic,
                     fontSize: 16,
-                    color: AppTheme.ink.withValues(alpha: 0.9),
+                    color: context.colors.ink.withValues(alpha: 0.9),
                   ),
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.close, size: 16, color: AppTheme.muted),
+                icon: Icon(Icons.close, size: 16, color: context.colors.muted),
                 // 44pt minimum (iOS HIG) — compact density shrank the hit box
                 // of the one control that makes this banner ignorable.
                 constraints:

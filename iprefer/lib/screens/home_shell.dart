@@ -56,8 +56,8 @@ class _HomeShellState extends State<HomeShell> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _compose,
-        backgroundColor: AppTheme.ink,
-        foregroundColor: AppTheme.paper,
+        backgroundColor: context.colors.ink,
+        foregroundColor: context.colors.paper,
         // 8dp like every real button; the default stadium pill reads as a
         // chip, and pills mean "selectable filter" everywhere else here.
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

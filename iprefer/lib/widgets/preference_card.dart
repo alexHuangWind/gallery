@@ -132,11 +132,11 @@ class _PreferenceCardState extends State<PreferenceCard> {
             Image(
               image: _paintImage,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const ColoredBox(
-                color: AppTheme.placeholder,
+              errorBuilder: (context, _, __) => ColoredBox(
+                color: context.colors.placeholder,
                 child: Center(
                   child: Icon(Icons.image_not_supported_outlined,
-                      size: 26, color: AppTheme.muted),
+                      size: 26, color: context.colors.muted),
                 ),
               ),
             ),

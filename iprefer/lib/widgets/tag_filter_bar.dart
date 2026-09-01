@@ -77,7 +77,7 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = selected ? AppTheme.paper : AppTheme.ink;
+    final fg = selected ? context.colors.paper : context.colors.ink;
 
     return Center(
       child: InkWell(
@@ -86,10 +86,10 @@ class _Chip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
           decoration: BoxDecoration(
-            color: selected ? AppTheme.ink : Colors.transparent,
+            color: selected ? context.colors.ink : Colors.transparent,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: selected ? AppTheme.ink : AppTheme.muted.withValues(alpha: 0.35),
+              color: selected ? context.colors.ink : context.colors.muted.withValues(alpha: 0.35),
             ),
           ),
           child: Text.rich(

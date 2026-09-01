@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
+    <!-- Resolves per configuration: values/colors.xml in light,
+         values-night/colors.xml in the dark. -->
+    <item android:drawable="@color/launch_background" />
 </layer-list>

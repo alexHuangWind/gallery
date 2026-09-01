@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- AppColors.dark.paper. Without this the splash flashed white before
+         the app came up near-black. -->
+    <color name="launch_background">#141311</color>
+</resources>

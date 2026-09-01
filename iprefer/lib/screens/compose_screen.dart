@@ -146,7 +146,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                       fontFamily: AppTheme.serif,
                       fontStyle: FontStyle.italic,
                       fontSize: 22,
-                      color: AppTheme.ink.withValues(alpha: 0.85),
+                      color: context.colors.ink.withValues(alpha: 0.85),
                     ),
                   ),
                 ],
@@ -171,9 +171,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
               ),
               const SizedBox(height: 28),
               FilledButton(
-                onPressed: (canMake && !_makingCard) ? _makeCard : null,
+                // Not disabled while making: a disabled M3 button loses the
+                // ink fill and the paper spinner vanishes into it. _makeCard
+                // guards its own re-entry.
+                onPressed: canMake ? _makeCard : null,
                 child: _makingCard
-                    ? const Row(
+                    ? Row(
                         mainAxisSize: MainAxisSize.min,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -181,10 +184,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
                             width: 14,
                             height: 14,
                             child: CircularProgressIndicator(
-                                strokeWidth: 1.6, color: AppTheme.paper),
+                                strokeWidth: 1.6, color: context.colors.paper),
                           ),
-                          SizedBox(width: 8),
-                          Text('making your card'),
+                          const SizedBox(width: 8),
+                          const Text('making your card'),
                         ],
                       )
                     : const Text('make card'),
@@ -214,18 +217,18 @@ class _PlaceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const muted = TextStyle(color: AppTheme.muted, fontSize: 13);
+    final muted = TextStyle(color: context.colors.muted, fontSize: 13);
 
     switch (state) {
       case _FixState.locating:
-        return const Row(
+        return Row(
           children: [
-            SizedBox(
+            const SizedBox(
               width: 13,
               height: 13,
               child: CircularProgressIndicator(strokeWidth: 1.6),
             ),
-            SizedBox(width: 10),
+            const SizedBox(width: 10),
             Text('finding where you are', style: muted),
           ],
         );
@@ -234,7 +237,7 @@ class _PlaceRow extends StatelessWidget {
         final label = fix?.label ?? 'this spot';
         return Row(
           children: [
-            const Icon(Icons.place_outlined, size: 16, color: AppTheme.muted),
+            Icon(Icons.place_outlined, size: 16, color: context.colors.muted),
             const SizedBox(width: 6),
             Expanded(
               child: Text(label, style: muted, overflow: TextOverflow.ellipsis),
@@ -257,9 +260,9 @@ class _PlaceRow extends StatelessWidget {
       case _FixState.dropped:
         return Row(
           children: [
-            const Icon(Icons.place_outlined, size: 16, color: AppTheme.muted),
+            Icon(Icons.place_outlined, size: 16, color: context.colors.muted),
             const SizedBox(width: 6),
-            const Text('no place on this one', style: muted),
+            Text('no place on this one', style: muted),
             const Spacer(),
             TextButton(
               onPressed: onRetry,
@@ -279,9 +282,9 @@ class _PlaceRow extends StatelessWidget {
       case _FixState.unavailable:
         return Row(
           children: [
-            const Icon(Icons.place_outlined, size: 16, color: AppTheme.muted),
+            Icon(Icons.place_outlined, size: 16, color: context.colors.muted),
             const SizedBox(width: 6),
-            const Expanded(child: Text("couldn't get your location", style: muted)),
+            Expanded(child: Text("couldn't get your location", style: muted)),
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(
@@ -345,20 +348,20 @@ class _PhotoWell extends StatelessWidget {
         onTap: () => _choose(context),
         child: Container(
           decoration: BoxDecoration(
-            color: AppTheme.placeholder,
+            color: context.colors.placeholder,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.muted.withValues(alpha: 0.3)),
+            border: Border.all(color: context.colors.muted.withValues(alpha: 0.3)),
           ),
           clipBehavior: Clip.antiAlias,
           child: photo == null
-              ? const Center(
+              ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.add_a_photo_outlined, size: 40, color: AppTheme.muted),
-                      SizedBox(height: 12),
+                      Icon(Icons.add_a_photo_outlined, size: 40, color: context.colors.muted),
+                      const SizedBox(height: 12),
                       Text('add a photo of something you like',
-                          style: TextStyle(color: AppTheme.muted)),
+                          style: TextStyle(color: context.colors.muted)),
                     ],
                   ),
                 )
