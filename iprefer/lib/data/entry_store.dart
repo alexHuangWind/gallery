@@ -1,6 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+// For the image-cache eviction in [EntryStore.writePhotoBytes] — the store
+// touches no widgets, only the cache the photo tiles resolve through.
+import 'package:flutter/painting.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -67,6 +70,11 @@ class EntryStore extends ChangeNotifier {
 
   /// Memoized [entries]. Invalidated in [notifyListeners], which every
   /// mutation on this class already goes through.
+  ///
+  /// That is only sufficient because of one invariant: `_box` is never mutated
+  /// from outside this class — nothing hands the box out, and every write goes
+  /// through a method here. Anyone who adds a path that puts to or deletes from
+  /// Hive without notifying leaves the timeline showing yesterday's archive.
   List<Entry>? _sorted;
   Map<String, int>? _counts;
   List<String>? _byUse;
@@ -95,9 +103,6 @@ class EntryStore extends ChangeNotifier {
   }
 
   bool get isEmpty => _box.isEmpty;
-
-  /// Entries that carry a location fix, newest first.
-  List<Entry> get located => entries.where((e) => e.hasLocation).toList();
 
   /// Every tag in use, most-used first, ties broken alphabetically.
   ///
@@ -157,6 +162,14 @@ class EntryStore extends ChangeNotifier {
 
   Entry? byId(String id) => _box.get(id);
 
+  /// Puts a ready-made entry straight into the box, for tests that need an
+  /// archive without a photo file to copy.
+  ///
+  /// Never call this from a screen: it skips both [_persistPhoto] and the
+  /// outbox, so the entry would reference a photo nobody wrote and would never
+  /// reach the server — an entry that exists on exactly one device and is lost
+  /// with it. Recording goes through [create].
+  @visibleForTesting
   Future<void> add(Entry entry) async {
     await _box.put(entry.id, entry);
     notifyListeners();
@@ -253,21 +266,74 @@ class EntryStore extends ChangeNotifier {
 
   bool hasPhoto(Entry entry) => fileFor(entry).existsSync();
 
+  /// Where a photo with this wire name *belongs*: always `photosRoot/<name>`.
+  ///
+  /// Deliberately without the legacy-path fallback [readPhotoBytes] has — this
+  /// is also the download destination, and a download must never be talked into
+  /// writing outside the photos directory by what a record happens to store.
   File _photoByName(String name) => File(p.join(photosRoot, name));
 
   /// Null when the file isn't there — a delete that raced the upload, or an
   /// OS reclaim. The caller drops the pending upload rather than retrying.
   Future<Uint8List?> readPhotoBytes(String name) async {
     final file = _photoByName(name);
-    if (!file.existsSync()) return null;
-    return file.readAsBytes();
+    if (file.existsSync()) return file.readAsBytes();
+
+    // Records written before the name-not-path change keep an absolute path,
+    // so their photo is not under photosRoot under this name and the lookup
+    // above misses it. Without this fallback the caller reads that miss as
+    // "the file is gone", marks the upload done and the photo never leaves the
+    // device — silently, and for every entry recorded before the change.
+    for (final entry in _box.values) {
+      if (entry.syncPhotoName != name) continue;
+      final legacy = fileFor(entry);
+      if (legacy.existsSync()) return legacy.readAsBytes();
+    }
+    return null;
   }
 
+  /// Stores a photo that came down from the server, then makes it visible.
+  ///
+  /// The eviction is the point. A tile whose photo hadn't downloaded yet
+  /// painted the error placeholder, and the completer that failed stays in the
+  /// image cache keyed by the provider — so every later resolve of the same
+  /// file is handed that same failure and the tile is a grey slab until the app
+  /// restarts. On a second device that is the entire visible payoff of syncing.
+  /// [notifyListeners] then rebuilds the timeline (nulling the memoized lists,
+  /// which is correct — the box did not change, and rebuilding them is cheap
+  /// next to a decode).
   Future<void> writePhotoBytes(String name, Uint8List bytes) async {
     final dir = Directory(photosRoot);
     if (!dir.existsSync()) dir.createSync(recursive: true);
-    await _photoByName(name).writeAsBytes(bytes, flush: true);
+    final file = _photoByName(name);
+    await file.writeAsBytes(bytes, flush: true);
+
+    // Best-effort, and deliberately swallowing: the bytes are already on disk
+    // and the notify below must still happen. A store running without a Flutter
+    // binding (the sync tests) has no image cache at all, and letting that
+    // throw here would abort the caller's whole photo pass over a cache hint.
+    try {
+      final cache = PaintingBinding.instance.imageCache;
+      final provider = FileImage(file);
+      cache.evict(provider);
+      // Grid tiles paint through a ResizeImage wrapper, which is a *separate*
+      // cache key — evicting the bare FileImage would leave exactly the screen
+      // this fix is for still stale. The key type has a private constructor, so
+      // obtainKey is the only way to build it from out here.
+      cache.evict(
+        await ResizeImage(provider, width: _compactDecodeWidth)
+            .obtainKey(ImageConfiguration.empty),
+      );
+    } catch (_) {}
+
+    notifyListeners();
   }
+
+  /// Decode width the compact cards ask for. Must stay in step with
+  /// `PreferenceCard._paintImage`; duplicated because that number belongs to
+  /// the widget and a wrong value here only means one stale tile, never a
+  /// wrong pixel.
+  static const int _compactDecodeWidth = 600;
 
   /// Copies a picked photo into app-private storage and returns its file name.
   ///

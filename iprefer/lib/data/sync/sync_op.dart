@@ -34,11 +34,29 @@ class SyncOp {
         if (payload != null) 'payload': payload,
       };
 
-  static SyncOp fromJson(Map<String, Object?> json) => SyncOp(
-        type: json['type'] == 'delete' ? SyncOpType.delete : SyncOpType.create,
-        entryId: json['entryId']! as String,
-        payload: (json['payload'] as Map?)?.cast<String, Object?>(),
-      );
+  /// Parses one op from the wire (or from the outbox, which stores this same
+  /// shape).
+  ///
+  /// Soft casts throughout: a hard one throws inside the pull loop before the
+  /// cursor advances, so a single malformed op from the server would make the
+  /// client replay that page forever and no later change would ever land.
+  /// [MalformedSyncOp] is reserved for the entry id — an op that doesn't say
+  /// what it is about cannot be applied to anything — and lets the caller skip
+  /// that one op and carry on.
+  static SyncOp fromJson(Map<String, Object?> json) {
+    final entryId = json['entryId'];
+    if (entryId is! String || entryId.isEmpty) throw MalformedSyncOp('entryId');
+    final payload = json['payload'];
+    return SyncOp(
+      // Anything that isn't the literal 'delete' is a create — the same
+      // reading as before, and it cannot throw on a garbage value.
+      type: json['type'] == 'delete' ? SyncOpType.delete : SyncOpType.create,
+      entryId: entryId,
+      // A payload of the wrong shape is treated as absent; the create is then
+      // skipped by the applier rather than crashing the pass.
+      payload: payload is Map ? payload.cast<String, Object?>() : null,
+    );
+  }
 }
 
 /// An op as it came back from the server, carrying its position in the log.
@@ -48,8 +66,14 @@ class RemoteOp {
   final int seq;
   final SyncOp op;
 
-  static RemoteOp fromJson(Map<String, Object?> json) => RemoteOp(
-        seq: (json['seq'] as num).toInt(),
-        op: SyncOp.fromJson(json),
-      );
+  /// [MalformedSyncOp] on a missing or unreadable seq: the sequence number is
+  /// the cursor. Defaulting it to 0 would rewind the client to the start of the
+  /// log, and defaulting it to the current cursor would let an op we never
+  /// applied be marked as applied — so this is the one place where refusing the
+  /// op is the only safe reading.
+  static RemoteOp fromJson(Map<String, Object?> json) {
+    final seq = json['seq'];
+    if (seq is! num) throw MalformedSyncOp('seq');
+    return RemoteOp(seq: seq.toInt(), op: SyncOp.fromJson(json));
+  }
 }
