@@ -1,23 +1,29 @@
 /// Sign in with Apple verification, exercised against real crypto.
 ///
-///   npm run dev            # wrangler dev, reading APPLE_JWKS_URL from .dev.vars
-///   node test/apple_auth.test.mjs
+///   npm test               # starts wrangler dev with APPLE_JWKS_URL pointed here
 ///
 /// Stands up a JWKS server on :8788 with a throwaway RSA keypair, then signs
 /// identity tokens — valid ones and every forgery worth trying. Getting this
 /// wrong means anyone can sign in as anyone, so it is tested with real
 /// signatures rather than a mock that says "yes".
+///
+/// The url the Worker fetches keys from arrives as a `--var` at launch (see
+/// test/dev_server.mjs), not from .dev.vars — this double only exists while
+/// this file is running, and pinning a dead address in .dev.vars turned every
+/// /v1/auth/apple call under a plain `wrangler dev` into a 500.
 
 import { createServer } from 'node:http';
 import { createHmac, createSign, generateKeyPairSync } from 'node:crypto';
 
-const BASE = process.env.SYNC_URL ?? 'http://127.0.0.1:8787';
-const JWKS_PORT = 8788;
+import { BASE, JWKS_PORT, REFETCH_COOLDOWN_MS } from './config.mjs';
+
 // Unique per run: the Worker caches JWKS by key id, and a fresh keypair under
 // a recycled kid would be checked against the previous run's public key.
 const KID = `iprefer-test-key-${Date.now()}`;
 const AUDIENCE = 'com.iprefer.iprefer';
 const ISSUER = 'https://appleid.apple.com';
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let passed = 0;
 const failures = [];
@@ -28,6 +34,19 @@ const check = (name, ok, detail) => {
 
 const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const jwk = { ...publicKey.export({ format: 'jwk' }), kid: KID, alg: 'RS256', use: 'sig' };
+
+// A second keypair, published later, to stand in for Apple rotating its keys.
+const ROTATED_KID = `iprefer-test-rotated-${Date.now()}`;
+const rotated = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const rotatedJwk = {
+  ...rotated.publicKey.export({ format: 'jwk' }), kid: ROTATED_KID, alg: 'RS256', use: 'sig',
+};
+
+/// What the double is currently publishing, and how often it has been asked.
+/// Both mutable: the refetch tests are entirely about *when* the Worker comes
+/// back and what it finds when it does.
+let published = [jwk];
+let fetches = 0;
 
 const b64 = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
 
@@ -54,6 +73,8 @@ function makeToken({
   } else if (signWith === 'hmac') {
     // Algorithm confusion: sign with HMAC using the public key as the secret.
     signature = createHmac('sha256', JSON.stringify(jwk)).update(signingInput).digest('base64url');
+  } else if (signWith === 'rotated') {
+    signature = createSign('RSA-SHA256').update(signingInput).sign(rotated.privateKey).toString('base64url');
   } else {
     signature = createSign('RSA-SHA256').update(signingInput).sign(privateKey).toString('base64url');
   }
@@ -82,8 +103,9 @@ const signIn = (opts) => post('/v1/auth/apple', { identityToken: makeToken(opts)
 
 async function main() {
   const jwks = createServer((req, res) => {
+    fetches++;
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ keys: [jwk] }));
+    res.end(JSON.stringify({ keys: published }));
   });
   await new Promise((r) => jwks.listen(JWKS_PORT, '127.0.0.1', r));
   console.log(`apple auth tests against ${BASE} (JWKS double on :${JWKS_PORT})\n`);
@@ -139,6 +161,40 @@ async function main() {
     // --- the dev hatch still exists locally, and is separate ---------------
     const dev = await post('/v1/auth/dev', { localId: 'apple-test-dev' });
     check('the dev hatch is still available locally', dev.status === 200);
+
+    // --- the unknown-kid refetch is rate limited --------------------------
+    //
+    // An unknown `kid` is how rotation shows up, so it triggers a refetch —
+    // which makes this unauthenticated endpoint a lever for aiming our
+    // outbound traffic at Apple. Minting bogus kids is free; the refetch must
+    // not be. Start from a known state by waiting the window out first, since
+    // the forgery above already spent one.
+    await sleep(REFETCH_COOLDOWN_MS + 500);
+    fetches = 0;
+    const burst = [];
+    for (let i = 0; i < 5; i++) {
+      burst.push((await signIn({ kid: `bogus-kid-${i}-${Date.now()}` })).status);
+    }
+    check('five unknown kids are all refused',
+      burst.every((s) => s === 401), burst.join(','));
+    check('five unknown kids cost at most two outbound JWKS fetches',
+      fetches <= 2, `made ${fetches}`);
+
+    // --- and rotation still recovers on its own ---------------------------
+    //
+    // The rate limit is only defensible if a genuinely new Apple key still
+    // works once the window passes — otherwise sign-in breaks the day Apple
+    // rotates and stays broken.
+    published = [jwk, rotatedJwk];
+
+    const tooSoon = await signIn({ kid: ROTATED_KID, signWith: 'rotated', sub: `rot-${Date.now()}` });
+    check('a key published inside the window is not picked up yet',
+      tooSoon.status === 401, `got ${tooSoon.status}`);
+
+    await sleep(REFETCH_COOLDOWN_MS + 500);
+    const recovered = await signIn({ kid: ROTATED_KID, signWith: 'rotated', sub: `rot-${Date.now()}` });
+    check('a rotated key verifies once the window passes',
+      recovered.status === 200, `got ${recovered.status} ${JSON.stringify(recovered.json)}`);
   } finally {
     jwks.close();
   }
