@@ -24,6 +24,17 @@ class SyncApiException implements Exception {
   String toString() => 'SyncApiException: $message';
 }
 
+/// The session token is no longer accepted.
+///
+/// Split out from [SyncApiException] because it is the one failure that
+/// retrying cannot fix: tokens last 30 days, and a lapsed one makes every
+/// sync fail identically to being offline. Without this distinction the app
+/// would keep "trying again" forever while quietly not backing anything up —
+/// the archive silently stops being safe and nothing ever says so.
+class SyncAuthExpiredException extends SyncApiException {
+  SyncAuthExpiredException() : super('the sync session has expired');
+}
+
 /// The server as the app sees it.
 ///
 /// An interface rather than a concrete client so the sync service can be
@@ -62,6 +73,7 @@ class HttpSyncApi implements SyncApi {
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
   Never _fail(http.BaseResponse res, String what) {
+    if (res.statusCode == 401) throw SyncAuthExpiredException();
     throw SyncApiException('$what failed: HTTP ${res.statusCode}');
   }
 

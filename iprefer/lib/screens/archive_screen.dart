@@ -5,6 +5,7 @@ import '../data/entry_store.dart';
 import '../data/archive_view.dart';
 import '../models/entry.dart';
 import '../theme.dart';
+import '../widgets/backup_bar.dart';
 import '../widgets/nearby_recall.dart';
 import '../widgets/preference_card.dart';
 import '../widgets/sort_bar.dart';
@@ -24,10 +25,19 @@ class ArchiveScreen extends StatelessWidget {
     final store = context.watch<EntryStore>();
 
     if (store.isEmpty) {
-      return _EmptyState(
-        onStart: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => const ComposeScreen()),
-        ),
+      // The backup line still belongs here: a lapsed session on a device with
+      // nothing recorded would otherwise have nowhere to say so.
+      return Column(
+        children: [
+          const BackupBar(),
+          Expanded(
+            child: _EmptyState(
+              onStart: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const ComposeScreen()),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
@@ -44,6 +54,8 @@ class ArchiveScreen extends StatelessWidget {
         // Zero height until the user has tagged something.
         const SliverToBoxAdapter(child: TagFilterBar()),
         const SliverToBoxAdapter(child: SortBar()),
+        // Zero height for a guest; one quiet line for an account.
+        const SliverToBoxAdapter(child: BackupBar()),
         // Surfaces only when the user is standing somewhere they've recorded
         // before; otherwise it takes zero height.
         SliverToBoxAdapter(child: NearbyRecall(tags: active)),

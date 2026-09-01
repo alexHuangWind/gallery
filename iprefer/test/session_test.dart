@@ -123,6 +123,82 @@ void main() {
     });
   });
 
+  group('a lapsed sync session', () {
+    test('stops sync without signing the person out', () async {
+      final session = sessionWith();
+      await session.signInWithApple();
+
+      await session.markSyncTokenExpired();
+
+      // The archive is local and complete; only the backup half lapsed.
+      // Throwing them back to a login screen would punish them for a clock.
+      expect(session.signedIn, isTrue);
+      expect(session.userId, 'server-user');
+      expect(session.syncEnabled, isFalse);
+      expect(session.syncTokenExpired, isTrue);
+    });
+
+    test('signing in again is the whole repair', () async {
+      final session = sessionWith();
+      await session.signInWithApple();
+      await session.markSyncTokenExpired();
+
+      await session.signInWithApple();
+
+      expect(session.syncTokenExpired, isFalse);
+      expect(session.syncEnabled, isTrue);
+      expect(session.syncToken, 'server-token');
+    });
+
+    test('marking it twice notifies once', () async {
+      final session = sessionWith();
+      await session.signInWithApple();
+      var notified = 0;
+      session.addListener(() => notified++);
+
+      await session.markSyncTokenExpired();
+      await session.markSyncTokenExpired();
+
+      expect(notified, 1);
+    });
+
+    test('a lapse cannot be recorded against nobody', () async {
+      final session = sessionWith();
+      await session.continueAsGuest();
+
+      // A sync pass from a previous account can land after sign-out. Letting
+      // it write here is what left guests staring at "sign in again" for an
+      // account they never had.
+      await session.markSyncTokenExpired();
+
+      expect(session.syncTokenExpired, isFalse);
+    });
+
+    test('continuing as a guest clears a lapse left by a previous account',
+        () async {
+      final session = sessionWith();
+      await session.signInWithApple();
+      await session.markSyncTokenExpired();
+      await session.signOut();
+
+      await session.continueAsGuest();
+
+      expect(session.syncTokenExpired, isFalse);
+      expect(session.syncEnabled, isFalse);
+    });
+
+    test('signing out clears the lapse too', () async {
+      final session = sessionWith();
+      await session.signInWithApple();
+      await session.markSyncTokenExpired();
+
+      await session.signOut();
+
+      // Otherwise the next account inherits a stale "expired" banner.
+      expect(session.syncTokenExpired, isFalse);
+    });
+  });
+
   group('sign out', () {
     test('clears the account and the sync token', () async {
       final session = sessionWith();

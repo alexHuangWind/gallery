@@ -24,6 +24,11 @@ class AppTheme {
   /// for multi-line supporting text: the login subhead, empty-state bodies.
   static const Color mutedText = Color(0xFF6E6A64);
 
+  /// For the rare line that must be noticed without being alarming — a lapsed
+  /// backup is not an error, it is something to attend to. Darker and warmer
+  /// than [muted], well short of [danger].
+  static const Color accentInk = Color(0xFF7A5C3E);
+
   /// The one color allowed in from outside the palette: destructive actions.
   /// Named and chosen — never ColorScheme.error, which is derived from the
   /// seed and would be an accidental tone like the chrome leaks this theme

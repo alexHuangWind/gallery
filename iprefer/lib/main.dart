@@ -78,9 +78,10 @@ class IPreferApp extends StatefulWidget {
 class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
   final ArchiveView _view = ArchiveView();
 
-  /// Null whenever there is no account — a guest archive has nowhere to sync
-  /// to, and that is a supported way to use the app, not a degraded one.
-  SyncService? _sync;
+  /// Always present so the UI can ask about backup state without every widget
+  /// coping with a missing service; it simply reports `enabled == false` for a
+  /// guest, which is a supported way to use the app rather than a degraded one.
+  late SyncService _sync;
   String? _syncingAs;
   bool _wasSignedIn = false;
 
@@ -110,41 +111,50 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
       widget.outbox.reset();
     }
     _wasSignedIn = signedIn;
-    _configureSync();
+    // The provider hands out this instance, so a swap needs a rebuild.
+    if (_configureSync()) setState(() {});
   }
 
-  /// Builds (or tears down) the sync service to match the current account.
-  void _configureSync() {
-    final token = widget.session.syncToken;
+  /// Rebuilds the sync service to match the current account.
+  ///
+  /// Returns true when the instance changed, so the caller can rebuild the
+  /// provider around it.
+  bool _configureSync() {
+    final token = widget.session.syncEnabled ? widget.session.syncToken : null;
+    final wanted = syncConfigured ? token : null;
+    if (_syncingAs == wanted && _initialised) return false;
 
-    if (token == null || !syncConfigured) {
-      _sync = null;
-      _syncingAs = null;
-      return;
-    }
-    if (_syncingAs == token) return; // already set up for this account
-
-    _syncingAs = token;
+    _syncingAs = wanted;
+    // Safe even mid-pass: SyncService guards its own notifications after
+    // disposal, so an in-flight sync's `finally` can no longer throw.
+    if (_initialised) _sync.dispose();
+    _initialised = true;
     _sync = SyncService(
-      api: HttpSyncApi(baseUrl: kSyncBaseUrl, token: token),
+      api: wanted == null ? null : HttpSyncApi(baseUrl: kSyncBaseUrl, token: wanted),
       outbox: widget.outbox,
       store: widget.store,
+      // Record the lapse on the session so the timeline can offer one
+      // sign-in instead of the app retrying a dead token forever.
+      onAuthExpired: widget.session.markSyncTokenExpired,
     );
-    _syncAfterSignIn();
+    if (wanted != null) _syncAfterSignIn();
+    return true;
   }
+
+  bool _initialised = false;
 
   Future<void> _syncAfterSignIn() async {
     // Anything recorded as a guest predates the account and has never been
     // offered to the server. Adopt it once, then sync normally.
     await widget.outbox.adoptExisting(widget.store.entries);
-    await _sync?.syncNow();
+    await _sync.syncNow();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Coming back is the natural moment: anything recorded offline goes up,
     // and anything recorded on another phone comes down.
-    if (state == AppLifecycleState.resumed) _sync?.syncNow();
+    if (state == AppLifecycleState.resumed) _sync.syncNow();
   }
 
   @override
@@ -152,7 +162,7 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.store.removeListener(_pruneFilter);
     widget.session.removeListener(_onSessionChanged);
-    _sync?.dispose();
+    _sync.dispose();
     _view.dispose();
     super.dispose();
   }
@@ -165,6 +175,8 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
         ChangeNotifierProvider<Session>.value(value: widget.session),
         // Filter + sort, shared so the timeline and the map stay in step.
         ChangeNotifierProvider<ArchiveView>.value(value: _view),
+        // So the timeline can say whether the archive is actually backed up.
+        ChangeNotifierProvider<SyncService>.value(value: _sync),
       ],
       child: MaterialApp(
         title: 'I prefer',

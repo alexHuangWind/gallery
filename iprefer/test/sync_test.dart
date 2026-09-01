@@ -20,12 +20,25 @@ class FakeSyncApi implements SyncApi {
   int _nextSeq = 1;
   bool offline = false;
 
+  /// The server no longer accepts our token (a 30-day session ran out).
+  bool expired = false;
+  int pullCalls = 0;
+  int pushCalls = 0;
+
+  void _guard() {
+    if (expired) throw SyncAuthExpiredException();
+    if (offline) throw SyncApiException('offline');
+  }
+
   /// Simulates an op written by another device.
   void seedRemote(SyncOp op) => log.add(RemoteOp(seq: _nextSeq++, op: op));
 
   @override
   Future<int> push(List<SyncOp> ops) async {
-    if (offline) throw SyncApiException('offline');
+    // Counted BEFORE the guard: a test asserting "we stopped calling the
+    // server" is worthless if the counter only increments on success.
+    pushCalls++;
+    _guard();
     pushes.add(List.of(ops));
     for (final op in ops) {
       final already = log.any((r) => r.op.type == op.type && r.op.entryId == op.entryId);
@@ -36,7 +49,8 @@ class FakeSyncApi implements SyncApi {
 
   @override
   Future<PullPage> pull({required int since, int limit = 200}) async {
-    if (offline) throw SyncApiException('offline');
+    pullCalls++;
+    _guard();
     final after = log.where((o) => o.seq > since).toList()
       ..sort((a, b) => a.seq.compareTo(b.seq));
     final page = after.take(limit).toList();
@@ -49,13 +63,13 @@ class FakeSyncApi implements SyncApi {
 
   @override
   Future<void> uploadPhoto(String name, Uint8List bytes) async {
-    if (offline) throw SyncApiException('offline');
+    _guard();
     photos[name] = bytes;
   }
 
   @override
   Future<Uint8List?> downloadPhoto(String name) async {
-    if (offline) throw SyncApiException('offline');
+    _guard();
     return photos[name];
   }
 }
@@ -181,6 +195,41 @@ void main() {
       expect(outbox.pending.map((o) => o.type),
           [SyncOpType.create, SyncOpType.delete]);
       expect(outbox.pendingPhotoUploads, isEmpty);
+    });
+
+    test('announces a save, so a status line cannot report a stale count',
+        () async {
+      var notified = 0;
+      outbox.addListener(() => notified++);
+
+      await record();
+
+      // Without this the backup line reads a count captured before the save
+      // it is meant to describe — claiming "backed up" at the exact moment
+      // something isn't.
+      expect(notified, greaterThan(0));
+    });
+
+    test('announces a delete too', () async {
+      final entry = await record();
+      var notified = 0;
+      outbox.addListener(() => notified++);
+
+      await store.delete(entry.id);
+
+      expect(notified, greaterThan(0));
+    });
+
+    test('remembers when the last sync finished, across launches', () async {
+      expect(outbox.lastSyncedAt, isNull);
+
+      await sync.syncNow();
+
+      expect(outbox.lastSyncedAt, isNotNull);
+      // Reading through the outbox is what makes it survive a relaunch and a
+      // service swap; an in-memory field always looked like "no idea".
+      final reopened = SyncService(api: api, outbox: outbox, store: store);
+      expect(reopened.lastSyncedAt, outbox.lastSyncedAt);
     });
 
     test('the cursor never moves backwards', () async {
@@ -422,6 +471,96 @@ void main() {
       final second = await sync.syncNow();
 
       expect(second.photosDownloaded, 0);
+    });
+  });
+
+  group('an expired session', () {
+    test('is reported as needing a sign-in rather than a plain failure',
+        () async {
+      await record();
+      api.expired = true;
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isFalse);
+      expect(result.error, isA<SyncAuthExpiredException>());
+      expect(sync.needsReauth, isTrue);
+    });
+
+    test('stops retrying, instead of hammering a dead token forever', () async {
+      await record();
+      api.expired = true;
+      await sync.syncNow();
+      final callsAfterFirst = api.pushCalls;
+
+      // Every resume, every save, every launch would otherwise try again.
+      await sync.syncNow();
+      await sync.syncNow();
+
+      expect(api.pushCalls, callsAfterFirst,
+          reason: 'a lapsed session must not keep generating requests');
+      expect(callsAfterFirst, 1, reason: 'the first attempt did reach the server');
+    });
+
+    test('keeps the queue and the archive intact', () async {
+      final entry = await record();
+      api.expired = true;
+
+      await sync.syncNow();
+
+      expect(store.byId(entry.id), isNotNull);
+      expect(outbox.pending.length, 1,
+          reason: 'everything must still be owed once the session is renewed');
+      expect(outbox.cursor, 0);
+    });
+
+    test('tells the session once, so the app can ask for one sign-in',
+        () async {
+      var told = 0;
+      final watched = SyncService(
+        api: api,
+        outbox: outbox,
+        store: store,
+        onAuthExpired: () async => told++,
+      );
+      await record();
+      api.expired = true;
+
+      await watched.syncNow();
+      await watched.syncNow();
+
+      expect(told, 1);
+    });
+
+    test('a renewed session resumes exactly where it stopped', () async {
+      final entry = await record();
+      api.expired = true;
+      await sync.syncNow();
+
+      // Signing in again produces a new service with a fresh token.
+      api.expired = false;
+      final renewed = SyncService(api: api, outbox: outbox, store: store);
+      final result = await renewed.syncNow();
+
+      expect(result.ok, isTrue);
+      expect(result.pushed, 1);
+      expect(outbox.pending, isEmpty);
+      expect(api.log.any((r) => r.op.entryId == entry.id), isTrue);
+    });
+  });
+
+  group('no account', () {
+    test('a service with no api reports itself off and does nothing', () async {
+      final guest = SyncService(api: null, outbox: outbox, store: store);
+      await record();
+
+      final result = await guest.syncNow();
+
+      expect(guest.enabled, isFalse);
+      expect(result.ok, isTrue);
+      expect(result.changedAnything, isFalse);
+      // The queue survives, ready for the day an account appears.
+      expect(outbox.pending.length, 1);
     });
   });
 

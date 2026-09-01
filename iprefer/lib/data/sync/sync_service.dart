@@ -40,36 +40,84 @@ class SyncResult {
 /// a lost entry and never in a thrown exception reaching the UI.
 class SyncService extends ChangeNotifier {
   SyncService({
-    required SyncApi api,
+    required SyncApi? api,
     required SyncOutbox outbox,
     required EntryStore store,
+    this.onAuthExpired,
     this.pageLimit = 200,
   })  : _api = api,
         _outbox = outbox,
-        _store = store;
+        _store = store {
+    // The queue changes without this service doing anything — every save and
+    // every delete enqueues. Forwarding keeps the backup line honest between
+    // sync passes instead of reporting a count from the last one.
+    _outbox.addListener(_onOutboxChanged);
+  }
 
-  final SyncApi _api;
+  void _onOutboxChanged() => _notify();
+
+  /// Guards the window where a replaced service is still finishing a pass.
+  /// Swapping accounts disposes the old instance while its `finally` may still
+  /// be pending; notifying then throws.
+  bool _disposed = false;
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _outbox.removeListener(_onOutboxChanged);
+    super.dispose();
+  }
+
+  /// Null when there is no account. The service still exists so the UI can
+  /// always ask it what's going on, rather than every widget having to cope
+  /// with a missing service.
+  final SyncApi? _api;
   final SyncOutbox _outbox;
   final EntryStore _store;
   final int pageLimit;
 
+  /// Called once when the server stops accepting our token, so the session can
+  /// remember that and the app can ask for one sign-in instead of retrying
+  /// forever. Awaited: it persists a flag, and dropping the future would turn
+  /// a failed write into an unhandled error with nothing retrying it.
+  final Future<void> Function()? onAuthExpired;
+
   bool _syncing = false;
-  DateTime? _lastSyncedAt;
+  bool _needsReauth = false;
   Object? _lastError;
 
+  bool get enabled => _api != null;
   bool get syncing => _syncing;
-  DateTime? get lastSyncedAt => _lastSyncedAt;
+  /// Read from storage, so it survives a relaunch and a service swap.
+  DateTime? get lastSyncedAt => _outbox.lastSyncedAt;
   Object? get lastError => _lastError;
+
+  /// The session has lapsed and syncing cannot resume without signing in.
+  bool get needsReauth => _needsReauth;
 
   /// Pending local changes, for a "not backed up yet" hint in the UI.
   int get pendingCount => _outbox.pending.length;
 
+  /// Only ever read from inside a pass that [syncNow] has already gated on
+  /// `_api != null`. A final field can't be promoted across method calls, so
+  /// the assertion lives here once instead of a bare `!` at four call sites.
+  SyncApi get _live => _api!;
+
   Future<SyncResult> syncNow() async {
+    // No account, or a session the server has already rejected: doing nothing
+    // is the honest answer. Retrying a dead token just burns battery and
+    // keeps the UI claiming it is trying.
+    if (_api == null || _needsReauth) return const SyncResult();
+
     // One pass at a time. A second caller (resume, manual tap, a save landing
     // mid-run) would otherwise push the same ops twice and race the cursor.
     if (_syncing) return const SyncResult();
     _syncing = true;
-    notifyListeners();
+    _notify();
 
     var pushed = 0;
     var pulled = 0;
@@ -83,8 +131,16 @@ class SyncService extends ChangeNotifier {
       final photos = await _syncPhotos();
       uploaded = photos.$1;
       downloaded = photos.$2;
-      _lastSyncedAt = DateTime.now();
+      await _outbox.recordSyncedNow();
       _lastError = null;
+    } on SyncAuthExpiredException catch (e) {
+      // The one failure retrying cannot fix. Stop trying and let the app ask
+      // for a sign-in — the queue and cursor are untouched, so everything
+      // resumes the moment there is a working session again.
+      failure = e;
+      _lastError = e;
+      _needsReauth = true;
+      await onAuthExpired?.call();
     } catch (e) {
       // Offline, a 500, a timeout — all the same answer: keep the queue and
       // the cursor exactly where they are, and try again next time.
@@ -92,7 +148,7 @@ class SyncService extends ChangeNotifier {
       _lastError = e;
     } finally {
       _syncing = false;
-      notifyListeners();
+      _notify();
     }
 
     return SyncResult(
@@ -110,7 +166,7 @@ class SyncService extends ChangeNotifier {
     final ops = _outbox.pending;
     if (ops.isEmpty) return 0;
 
-    await _api.push(ops);
+    await _live.push(ops);
     await _outbox.forget(ops);
     return ops.length;
   }
@@ -121,7 +177,7 @@ class SyncService extends ChangeNotifier {
     var guard = 0;
 
     while (true) {
-      final page = await _api.pull(since: _outbox.cursor, limit: pageLimit);
+      final page = await _live.pull(since: _outbox.cursor, limit: pageLimit);
       for (final remote in page.ops) {
         await _apply(remote.op);
         applied++;
@@ -170,7 +226,7 @@ class SyncService extends ChangeNotifier {
         await _outbox.markPhotoUploaded(name);
         continue;
       }
-      await _api.uploadPhoto(name, bytes);
+      await _live.uploadPhoto(name, bytes);
       await _outbox.markPhotoUploaded(name);
       uploaded++;
     }
@@ -181,7 +237,7 @@ class SyncService extends ChangeNotifier {
     // like a missing file next time.
     for (final entry in _store.entries) {
       if (_store.hasPhoto(entry)) continue;
-      final bytes = await _api.downloadPhoto(entry.syncPhotoName);
+      final bytes = await _live.downloadPhoto(entry.syncPhotoName);
       if (bytes == null) continue; // not uploaded yet by the other device
       await _store.writePhotoBytes(entry.syncPhotoName, bytes);
       downloaded++;

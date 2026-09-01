@@ -35,6 +35,7 @@ class Session extends ChangeNotifier {
   static const String _boxName = 'session';
   static const String _userIdKey = 'userId';
   static const String _tokenKey = 'syncToken';
+  static const String _expiredKey = 'syncTokenExpired';
 
   final Box _box;
   final AppleIdentityTokenProvider _appleToken;
@@ -60,11 +61,25 @@ class Session extends ChangeNotifier {
   /// what makes a guest local-only: no token, nothing to sync with.
   String? get syncToken => _box.get(_tokenKey) as String?;
 
-  bool get syncEnabled => syncToken != null;
+  bool get syncEnabled => syncToken != null && !syncTokenExpired;
 
-  /// True when this account could be backed up but isn't — the one state
-  /// worth nudging about.
-  bool get canEnableSync => syncConfigured && !syncEnabled;
+  /// The server has stopped accepting our token — tokens last 30 days.
+  ///
+  /// This deliberately does NOT sign the person out. Their archive is local
+  /// and complete; only the backup half has lapsed. Throwing them back to a
+  /// login screen would punish them for a clock running out, so the app keeps
+  /// working and asks for one sign-in to resume backing up.
+  bool get syncTokenExpired => _box.get(_expiredKey) == true;
+
+  Future<void> markSyncTokenExpired() async {
+    // A pass still in flight from a previous account can land after sign-out.
+    // Recording a lapse against nobody is what left guests staring at a
+    // "sign in again" prompt for an account they never had.
+    if (_box.get(_tokenKey) == null) return;
+    if (syncTokenExpired) return;
+    await _box.put(_expiredKey, true);
+    notifyListeners();
+  }
 
   /// Local id, no account, no network. Unchanged from before there was a
   /// backend, and still the default way in.
@@ -72,6 +87,7 @@ class Session extends ChangeNotifier {
     if (_box.get(_userIdKey) == null) {
       await _box.put(_userIdKey, 'local-${const Uuid().v4()}');
     }
+    await _box.delete(_expiredKey);
     notifyListeners();
   }
 
@@ -87,6 +103,8 @@ class Session extends ChangeNotifier {
     final session = await _auth.exchangeAppleToken(identityToken);
     await _box.put(_userIdKey, session.userId);
     await _box.put(_tokenKey, session.token);
+    // A fresh token clears the lapse, so signing in again is the whole repair.
+    await _box.delete(_expiredKey);
     notifyListeners();
     return true;
   }
@@ -94,6 +112,7 @@ class Session extends ChangeNotifier {
   Future<void> signOut() async {
     await _box.delete(_userIdKey);
     await _box.delete(_tokenKey);
+    await _box.delete(_expiredKey);
     notifyListeners();
   }
 

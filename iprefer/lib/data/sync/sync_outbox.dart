@@ -12,7 +12,10 @@ import 'sync_op.dart';
 /// Sync state is not part of the domain model — an entry is the same entry
 /// whether or not a server has heard of it — and keeping it in its own boxes
 /// means the adapter's field ids and its legacy-layout tests stay untouched.
-class SyncOutbox {
+/// A [ChangeNotifier] because the UI reports on it. Without notification the
+/// backup line reads a count captured before the save it is meant to describe,
+/// and tells the user everything is backed up at the exact moment it isn't.
+class SyncOutbox extends ChangeNotifier {
   SyncOutbox._(this._ops, this._meta, this._photos);
 
   @visibleForTesting
@@ -23,6 +26,7 @@ class SyncOutbox {
   static const String _photosBox = 'sync_photo_uploads';
   static const String _cursorKey = 'cursor';
   static const String _adoptedKey = 'adoptedExisting';
+  static const String _lastSyncedKey = 'lastSyncedAt';
 
   final Box _ops;
   final Box _meta;
@@ -53,6 +57,7 @@ class SyncOutbox {
     final op = SyncOp.create(entry);
     await _ops.put(op.key, jsonEncode(op.toJson()));
     await _photos.put(entry.syncPhotoName, true);
+    notifyListeners();
   }
 
   Future<void> enqueueDelete(String entryId, {String? photoName}) async {
@@ -63,11 +68,13 @@ class SyncOutbox {
     // goes — the server records both, and other devices replay create then
     // delete to arrive at the same place.)
     if (photoName != null) await _photos.delete(photoName);
+    notifyListeners();
   }
 
   /// Drops ops the server has accepted.
   Future<void> forget(Iterable<SyncOp> ops) async {
     await _ops.deleteAll([for (final o in ops) o.key]);
+    notifyListeners();
   }
 
   /// Queues everything recorded before this account existed — a guest's
@@ -84,6 +91,7 @@ class SyncOutbox {
       await enqueueCreate(entry);
     }
     await _meta.put(_adoptedKey, true);
+    notifyListeners();
   }
 
   // --- the pull cursor -----------------------------------------------------
@@ -104,7 +112,25 @@ class SyncOutbox {
   /// Photos this device has but the server may not.
   Set<String> get pendingPhotoUploads => _photos.keys.cast<String>().toSet();
 
-  Future<void> markPhotoUploaded(String name) => _photos.delete(name);
+  Future<void> markPhotoUploaded(String name) async {
+    await _photos.delete(name);
+    notifyListeners();
+  }
+
+  /// When this device last completed a sync, kept across launches.
+  ///
+  /// In memory only, the bar could never say "backed up 6 days ago" — the one
+  /// reading that actually reveals a problem — because a cold start always
+  /// looked like "no idea".
+  DateTime? get lastSyncedAt {
+    final ms = _meta.get(_lastSyncedKey) as int?;
+    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  Future<void> recordSyncedNow() async {
+    await _meta.put(_lastSyncedKey, DateTime.now().millisecondsSinceEpoch);
+    notifyListeners();
+  }
 
   /// Wipes every trace of syncing. For sign-out: the next account must not
   /// inherit this one's queue or cursor.
@@ -112,5 +138,6 @@ class SyncOutbox {
     await _ops.clear();
     await _meta.clear();
     await _photos.clear();
+    notifyListeners();
   }
 }
