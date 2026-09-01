@@ -177,24 +177,42 @@ class _ArchiveTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // InkWell rather than a bare GestureDetector so both the tap and the
-    // long-press visibly register before anything happens. The splash is
-    // explicit muted ink — the default ripple resolves from the seed-derived
-    // primary, which is exactly the stray color the theme keeps out.
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        splashColor: context.colors.ink.withValues(alpha: 0.06),
-        highlightColor: context.colors.ink.withValues(alpha: 0.04),
-        onTap: () => _open(context),
-        onLongPress: () => _confirmDelete(context),
-        child: PreferenceCard(
-          image: FileImage(context.read<EntryStore>().fileFor(entry)),
-          text: entry.text,
-          createdAt: entry.createdAt,
-          placeLabel: entry.placeLabel,
-          compact: true,
+    final place = entry.placeLabel;
+
+    // The tile's own parts announce as a stack of unrelated strings, and the
+    // only way to remove an entry is a long press — an affordance nothing on
+    // screen or in the semantics tree mentioned. One button node says what
+    // the card is, and the hint says what holding it does.
+    return Semantics(
+      button: true,
+      label: [
+        entry.text,
+        if (place != null && place.isNotEmpty) place,
+        quietDate(entry.createdAt),
+      ].join(', '),
+      excludeSemantics: true,
+      onTap: () => _open(context),
+      onLongPress: () => _confirmDelete(context),
+      onLongPressHint: 'remove',
+      // InkWell rather than a bare GestureDetector so both the tap and the
+      // long-press visibly register before anything happens. The splash is
+      // explicit muted ink — the default ripple resolves from the seed-derived
+      // primary, which is exactly the stray color the theme keeps out.
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          splashColor: context.colors.ink.withValues(alpha: 0.06),
+          highlightColor: context.colors.ink.withValues(alpha: 0.04),
+          onTap: () => _open(context),
+          onLongPress: () => _confirmDelete(context),
+          child: PreferenceCard(
+            image: FileImage(context.read<EntryStore>().fileFor(entry)),
+            text: entry.text,
+            createdAt: entry.createdAt,
+            placeLabel: entry.placeLabel,
+            compact: true,
+          ),
         ),
       ),
     );

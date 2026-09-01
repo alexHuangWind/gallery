@@ -33,11 +33,11 @@ class OnThisDay extends StatefulWidget {
   /// Hides the banner without unmounting it.
   ///
   /// A `if (…) …` in the parent's child list would tear this widget's State
-  /// down instead: the dismissal is meant to last the session, and the
-  /// location lookup behind it is a GPS read plus a reverse geocode. Passing
-  /// the suppression in keeps both.
+  /// down instead, and this State is holding two things worth keeping: a
+  /// dismissal that is meant to last the session, and the date the banner is
+  /// answering for, which the lifecycle observer keeps current across a
+  /// midnight. Passing the suppression in keeps both.
   final bool suppressed;
-
 
   @override
   State<OnThisDay> createState() => _OnThisDayState();
@@ -125,15 +125,7 @@ class _OnThisDayState extends State<OnThisDay> with WidgetsBindingObserver {
             ],
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            height: 116,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: anniversary.entries.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) => EntryChip(entry: anniversary.entries[i]),
-            ),
-          ),
+          EntryStrip(entries: anniversary.entries),
         ],
       ),
     );

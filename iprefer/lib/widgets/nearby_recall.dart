@@ -37,7 +37,6 @@ class NearbyRecall extends StatefulWidget {
   /// the suppression in keeps both.
   final bool suppressed;
 
-
   @override
   State<NearbyRecall> createState() => _NearbyRecallState();
 }
@@ -132,15 +131,7 @@ class _NearbyRecallState extends State<NearbyRecall>
             ],
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            height: 116,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: nearby.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) => EntryChip(entry: nearby[i]),
-            ),
-          ),
+          EntryStrip(entries: nearby),
         ],
       ),
     );

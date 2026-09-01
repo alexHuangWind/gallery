@@ -17,31 +17,52 @@ class SortBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final view = context.watch<ArchiveView>();
 
+    final row = Row(
+      children: [
+        Text(
+          'sorted by',
+          style: TextStyle(color: context.colors.muted, fontSize: 12),
+        ),
+        const SizedBox(width: 10),
+        _Option(
+          label: 'newest',
+          selected: view.sort == ArchiveSort.newest,
+          onTap: () => context.read<ArchiveView>().setSort(ArchiveSort.newest),
+        ),
+        const SizedBox(width: 6),
+        _Option(
+          label: 'nearest',
+          selected: view.sort == ArchiveSort.nearest,
+          onTap: () => context.read<ArchiveView>().setSort(ArchiveSort.nearest),
+        ),
+        const SizedBox(width: 10),
+        if (view.sort == ArchiveSort.nearest)
+          Expanded(child: _NearestStatus(view: view)),
+      ],
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-      child: Row(
-        children: [
-          Text(
-            'sorted by',
-            style: TextStyle(color: context.colors.muted, fontSize: 12),
+      // The label and the two pills are as wide as their type: at the larger
+      // system text sizes they outgrow a phone, and on `newest` there isn't
+      // even a flexible child left to absorb the excess — the row simply
+      // overflowed. It scrolls instead.
+      //
+      // The pair below is what keeps that from costing anything at ordinary
+      // type sizes: inside a scroll view the row would be handed unbounded
+      // width, which both breaks [Expanded] and would let a long place label
+      // run on instead of ellipsing. IntrinsicWidth asks the row how wide it
+      // wants to be and the minWidth floors that at the viewport, so as long
+      // as the controls fit, the row is laid out at exactly the width it had
+      // before and nothing scrolls.
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minWidth: constraints.maxWidth),
+            child: IntrinsicWidth(child: row),
           ),
-          const SizedBox(width: 10),
-          _Option(
-            label: 'newest',
-            selected: view.sort == ArchiveSort.newest,
-            onTap: () => context.read<ArchiveView>().setSort(ArchiveSort.newest),
-          ),
-          const SizedBox(width: 6),
-          _Option(
-            label: 'nearest',
-            selected: view.sort == ArchiveSort.nearest,
-            onTap: () =>
-                context.read<ArchiveView>().setSort(ArchiveSort.nearest),
-          ),
-          const SizedBox(width: 10),
-          if (view.sort == ArchiveSort.nearest)
-            Expanded(child: _NearestStatus(view: view)),
-        ],
+        ),
       ),
     );
   }
