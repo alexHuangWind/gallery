@@ -176,7 +176,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     final strip = tester.getRect(find.byType(TagFilterBar));
-    final label = tester.getRect(find.text('flowers'));
+    // Text.rich — the count rides along in the same run, so match a substring.
+    final label = tester.getRect(find.textContaining('flowers'));
     expect(label.top, greaterThanOrEqualTo(strip.top));
     expect(label.bottom, lessThanOrEqualTo(strip.bottom));
   });
