@@ -13,7 +13,7 @@ and turns on backup/sync against a small Cloudflare Workers backend — see
 ## Status
 
 **Compiled and exercised on a real machine** (2026-08-20, Flutter 3.44.1
-stable): `flutter analyze` is clean, all 277 tests pass (across 24 files —
+stable): `flutter analyze` is clean, all 279 tests pass (across 24 files —
 see [Tests](#tests) below), a debug APK builds, the app builds and runs on the
 iOS simulator. The full recording flow has been walked by hand there — photo
 → caption → tags → card → save/share export, with location granted and with
@@ -333,7 +333,7 @@ Things worth knowing before you change this:
 flutter test
 ```
 
-277 tests across 24 files:
+279 tests across 24 files:
 
 | file | covers |
 |---|---|
