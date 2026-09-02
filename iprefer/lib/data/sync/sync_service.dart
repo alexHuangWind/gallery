@@ -307,6 +307,13 @@ class SyncService extends ChangeNotifier {
   /// after the records had already synced, which meant the sync was never
   /// recorded as done and the UI told the user their backup was unreachable
   /// while their archive was, in fact, safe on the server.
+  /// The entry a photo belongs to: names are always `<entryId>.<ext>`
+  /// (see Entry.syncPhotoName).
+  static String _entryIdOf(String photoName) {
+    final dot = photoName.lastIndexOf('.');
+    return dot > 0 ? photoName.substring(0, dot) : photoName;
+  }
+
   Future<({int uploaded, int downloaded, int failed})> _syncPhotos(
       int generation) async {
     var uploaded = 0;
@@ -316,9 +323,25 @@ class SyncService extends ChangeNotifier {
     ({int uploaded, int downloaded, int failed}) tally() =>
         (uploaded: uploaded, downloaded: downloaded, failed: failed);
 
+    // Entries whose create op the server has not acknowledged yet. The photo
+    // phase runs even when the push failed, and the server refuses a photo
+    // for an entry it has never heard of (409). Without this, that refusal
+    // would read as "the server will never take this one" below and the photo
+    // would be dropped from the queue for good — while its create op syncs
+    // fine on the next pass, leaving a record on the server permanently
+    // without its picture.
+    final unpushed = {
+      for (final op in _outbox.pending)
+        if (op.type == SyncOpType.create) op.entryId,
+    };
+
     // Up: whatever this device recorded and hasn't shipped.
     for (final name in _outbox.pendingPhotoUploads) {
       if (_abandoned(generation)) return tally();
+      if (unpushed.contains(_entryIdOf(name))) {
+        failed++; // still queued; it goes up once its record has
+        continue;
+      }
       final bytes = await _store.readPhotoBytes(name);
       if (_abandoned(generation)) return tally();
       if (bytes == null) {
@@ -333,7 +356,11 @@ class SyncService extends ChangeNotifier {
         rethrow; // the session, not the photo — the pass has to stop
       } catch (e) {
         if (_abandoned(generation)) return tally();
-        if (e is SyncApiException && e.isPermanent) {
+        // 409 is "push the entry first", a precondition that the next pass
+        // meets — never a verdict on the photo. It is excluded from the
+        // permanent set for the same reason the unpushed check exists above:
+        // dropping the photo here loses it from the backup for good.
+        if (e is SyncApiException && e.isPermanent && e.statusCode != 409) {
           // The server will never take this one (too big, wrong name). It is
           // retried first on every pass, so leaving it queued means every
           // photo behind it waits on a failure that cannot resolve. Drop it:

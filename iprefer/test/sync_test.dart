@@ -812,6 +812,44 @@ void main() {
           reason: 'a 500 is the server having a bad day, not refusing the file');
     });
 
+    test('a photo is not offered before its record has reached the server',
+        () async {
+      // The photo phase runs even when the push failed. The server answers
+      // 409 for a photo whose entry it has never heard of, and a 4xx used to
+      // read as "give up on this one" — so one bad push dropped the photo from
+      // the queue for good while its record synced fine on the next pass.
+      final entry = await record();
+      api.rejectPushAfter = 0; // every push fails this pass
+      api.uploadRejections[entry.syncPhotoName] = 409;
+
+      final first = await sync.syncNow();
+
+      expect(first.ok, isFalse, reason: 'the push failure is still reported');
+      expect(api.uploadAttempts, isNot(contains(entry.syncPhotoName)),
+          reason: 'no point asking while the create op is still queued');
+      expect(outbox.pendingPhotoUploads, {entry.syncPhotoName});
+
+      api.rejectPushAfter = null;
+      api.uploadRejections.remove(entry.syncPhotoName);
+      final second = await sync.syncNow();
+
+      expect(second.ok, isTrue);
+      expect(api.photos.keys, contains(entry.syncPhotoName));
+      expect(outbox.pendingPhotoUploads, isEmpty);
+    });
+
+    test('a 409 keeps the photo queued even if the record was pushed',
+        () async {
+      // Belt to the braces above: if the server ever 409s for a reason the
+      // client did not anticipate, the photo must wait, not vanish.
+      final entry = await record();
+      api.uploadRejections[entry.syncPhotoName] = 409;
+
+      await sync.syncNow();
+
+      expect(outbox.pendingPhotoUploads, {entry.syncPhotoName});
+    });
+
     test('downloads are bounded per pass, and the rest arrive next time',
         () async {
       for (var i = 0; i < 30; i++) {
