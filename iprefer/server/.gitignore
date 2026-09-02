@@ -1,6 +1,5 @@
 node_modules/
 .wrangler/
-package-lock.json
 
 # The pid of the `wrangler dev` that `npm test` starts for itself.
 .dev-server.pid
