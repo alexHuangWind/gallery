@@ -5,13 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
 import 'package:iprefer/data/entry_store.dart';
 import 'package:iprefer/models/entry.dart';
 import 'package:iprefer/theme.dart';
+import 'package:iprefer/widgets/entry_chip.dart';
 import 'package:iprefer/widgets/on_this_day.dart';
-import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+
+import 'support/harness.dart';
 
 /// The banner only appears on an anniversary, so a device can't show it on
 /// demand — the date seam is what makes these states reachable at all.
@@ -19,28 +20,18 @@ import 'package:provider/provider.dart';
 /// The last test renders the real thing to a PNG so the layout can be looked
 /// at rather than only asserted about.
 void main() {
-  late Directory tempDir;
-  late Box<Entry> box;
+  late TestEnv env;
   late EntryStore store;
-  late String photosRoot;
   var seq = 0;
 
   final today = DateTime(2026, 8, 25, 14);
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_on_this_day_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) Hive.registerAdapter(EntryAdapter());
-    box = await Hive.openBox<Entry>('entries_${seq++}');
-    photosRoot = p.join(tempDir.path, 'photos');
-    Directory(photosRoot).createSync(recursive: true);
-    store = EntryStore.forTest(box, photosRoot: photosRoot);
+    env = await TestEnv.create('iprefer_on_this_day_test');
+    store = await env.store(withOutbox: false);
   });
 
-  tearDown(() async {
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-  });
+  tearDown(() => env.dispose());
 
   Future<void> seed(WidgetTester tester, DateTime when, String text) {
     return tester.runAsync(() async {
@@ -67,7 +58,9 @@ void main() {
       ),
     );
     return tester.pumpWidget(
-      boundary == null ? content : RepaintBoundary(key: boundary, child: content),
+      boundary == null
+          ? content
+          : RepaintBoundary(key: boundary, child: content),
     );
   }
 
@@ -82,7 +75,8 @@ void main() {
 
   testWidgets('an anniversary names itself and shows what you liked',
       (tester) async {
-    await seed(tester, DateTime(2025, 8, 25, 9), 'a flat white before the world wakes up');
+    await seed(tester, DateTime(2025, 8, 25, 9),
+        'a flat white before the world wakes up');
 
     await pump(tester);
 
@@ -101,6 +95,25 @@ void main() {
     expect(find.text('a month ago today'), findsOneWidget);
   });
 
+  testWidgets('each chip is keyed to its entry', (tester) async {
+    await seed(
+        tester, DateTime(2025, 8, 25, 9), 'flowers that outshout the street');
+    await seed(
+        tester, DateTime(2025, 8, 25, 18), 'water that forgets to hurry');
+
+    await pump(tester);
+
+    // Unkeyed, the strip's elements are matched by position: an entry
+    // arriving at the head hands every chip below it a different photo to
+    // decode, on a list that exists to be scrolled.
+    final ids = store.entries.map((e) => e.id).toSet();
+    final keys = tester
+        .widgetList<EntryChip>(find.byType(EntryChip))
+        .map((chip) => (chip.key! as ValueKey<String>).value);
+    expect(keys, hasLength(2));
+    expect(keys, everyElement(isIn(ids)));
+  });
+
   testWidgets('dismissing it collapses the banner for the session',
       (tester) async {
     await seed(tester, DateTime(2025, 8, 25), 'a thing');
@@ -116,11 +129,13 @@ void main() {
 
   testWidgets('renders a preview png so the layout can be looked at',
       (tester) async {
-    await seed(tester, DateTime(2025, 8, 25, 9), 'flowers that outshout the whole street');
-    await seed(tester, DateTime(2025, 8, 25, 18), 'water that forgets to hurry');
+    await seed(tester, DateTime(2025, 8, 25, 9),
+        'flowers that outshout the whole street');
+    await seed(
+        tester, DateTime(2025, 8, 25, 18), 'water that forgets to hurry');
 
-    final fontBytes =
-        File('assets/fonts/PlayfairDisplay-Italic-Variable.ttf').readAsBytesSync();
+    final fontBytes = File('assets/fonts/PlayfairDisplay-Italic-Variable.ttf')
+        .readAsBytesSync();
     final loader = FontLoader('PlayfairDisplay')
       ..addFont(Future.value(ByteData.view(fontBytes.buffer)));
     await loader.load();

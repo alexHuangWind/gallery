@@ -1,6 +1,8 @@
 node_modules/
 .wrangler/
-package-lock.json
+
+# The pid of the `wrangler dev` that `npm test` starts for itself.
+.dev-server.pid
 
 # .dev.vars IS committed on purpose: it holds only DEV_AUTH=1, which is a
 # local-dev switch rather than a secret, and checking it in keeps

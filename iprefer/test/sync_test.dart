@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -8,73 +10,15 @@ import 'package:iprefer/data/sync/sync_api.dart';
 import 'package:iprefer/data/sync/sync_op.dart';
 import 'package:iprefer/data/sync/sync_outbox.dart';
 import 'package:iprefer/data/sync/sync_service.dart';
+import 'package:iprefer/data/sync/sync_validate.dart';
 import 'package:iprefer/models/entry.dart';
 import 'package:path/path.dart' as p;
 
-/// Stands in for `server/`, including the parts that matter for correctness:
-/// a monotonic op log, cursor-based paging, and idempotent creates.
-class FakeSyncApi implements SyncApi {
-  final List<List<SyncOp>> pushes = [];
-  final List<RemoteOp> log = [];
-  final Map<String, Uint8List> photos = {};
-  int _nextSeq = 1;
-  bool offline = false;
-
-  /// The server no longer accepts our token (a 30-day session ran out).
-  bool expired = false;
-  int pullCalls = 0;
-  int pushCalls = 0;
-
-  void _guard() {
-    if (expired) throw SyncAuthExpiredException();
-    if (offline) throw SyncApiException('offline');
-  }
-
-  /// Simulates an op written by another device.
-  void seedRemote(SyncOp op) => log.add(RemoteOp(seq: _nextSeq++, op: op));
-
-  @override
-  Future<int> push(List<SyncOp> ops) async {
-    // Counted BEFORE the guard: a test asserting "we stopped calling the
-    // server" is worthless if the counter only increments on success.
-    pushCalls++;
-    _guard();
-    pushes.add(List.of(ops));
-    for (final op in ops) {
-      final already = log.any((r) => r.op.type == op.type && r.op.entryId == op.entryId);
-      if (!already) log.add(RemoteOp(seq: _nextSeq++, op: op));
-    }
-    return log.isEmpty ? 0 : log.last.seq;
-  }
-
-  @override
-  Future<PullPage> pull({required int since, int limit = 200}) async {
-    pullCalls++;
-    _guard();
-    final after = log.where((o) => o.seq > since).toList()
-      ..sort((a, b) => a.seq.compareTo(b.seq));
-    final page = after.take(limit).toList();
-    return PullPage(
-      ops: page,
-      seq: page.isEmpty ? since : page.last.seq,
-      hasMore: after.length > page.length,
-    );
-  }
-
-  @override
-  Future<void> uploadPhoto(String name, Uint8List bytes) async {
-    _guard();
-    photos[name] = bytes;
-  }
-
-  @override
-  Future<Uint8List?> downloadPhoto(String name) async {
-    _guard();
-    return photos[name];
-  }
-}
+import 'support/fakes.dart';
+import 'support/harness.dart';
 
 void main() {
+  late TestEnv env;
   late Directory tempDir;
   late Box<Entry> entriesBox;
   late SyncOutbox outbox;
@@ -84,33 +28,19 @@ void main() {
   late String photosRoot;
 
   final when = DateTime.fromMillisecondsSinceEpoch(1755000000000);
-  var boxSeq = 0;
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_sync_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) Hive.registerAdapter(EntryAdapter());
-
-    // Unique names so each test gets clean boxes.
-    final n = boxSeq++;
-    entriesBox = await Hive.openBox<Entry>('entries_$n');
-    outbox = SyncOutbox.forTest(
-      await Hive.openBox('ops_$n'),
-      await Hive.openBox('meta_$n'),
-      await Hive.openBox('photos_$n'),
-    );
-    photosRoot = p.join(tempDir.path, 'photos');
-    Directory(photosRoot).createSync(recursive: true);
-
-    store = EntryStore.forTest(entriesBox, photosRoot: photosRoot, outbox: outbox);
+    env = await TestEnv.create('iprefer_sync_test');
+    tempDir = env.tempDir;
+    photosRoot = env.photosRoot;
+    entriesBox = await env.entriesBox();
+    outbox = await env.outbox();
+    store = await env.store();
     api = FakeSyncApi();
     sync = SyncService(api: api, outbox: outbox, store: store);
   });
 
-  tearDown(() async {
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-  });
+  tearDown(() => env.dispose());
 
   File sourcePhoto([String name = 'picked.jpg']) {
     final f = File(p.join(tempDir.path, name));
@@ -124,6 +54,10 @@ void main() {
         createdAt: when,
         tags: const ['coffee'],
       );
+
+  /// A distinct, well-formed id for the bulk cases.
+  String bulkId(int i) =>
+      '${i.toString().padLeft(8, '0')}-cccc-4ccc-8ccc-cccccccccccc';
 
   Entry remoteEntry(String id, {String text = 'from another phone'}) => Entry(
         id: id,
@@ -160,7 +94,8 @@ void main() {
     test('derives the photo name from the id, not a legacy absolute path', () {
       final legacy = Entry(
         id: '22222222-2222-4222-8222-222222222222',
-        localPath: '/var/mobile/Containers/OLD-UUID/Documents/photos/whatever.JPG',
+        localPath:
+            '/var/mobile/Containers/OLD-UUID/Documents/photos/whatever.JPG',
         text: 'x',
         createdAt: when,
       );
@@ -241,49 +176,201 @@ void main() {
   });
 
   group('adopting a guest archive at sign-in', () {
+    const String accountA = 'apple-user-a';
+    const String accountB = 'apple-user-b';
+
+    /// A store with no outbox behind it — entries recorded as a guest.
+    EntryStore guestArchive() =>
+        EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+
+    /// Signs A in, lets the archive reach the server, then signs out the way
+    /// the app does.
+    Future<void> signInAdoptAndOut(EntryStore archive) async {
+      await outbox.adoptExisting(archive.entries, userId: accountA);
+      await outbox.forget(outbox.pending);
+      for (final name in outbox.pendingPhotoUploads.toList()) {
+        await outbox.markPhotoUploaded(name);
+      }
+      await outbox.reset();
+    }
+
     test('queues entries recorded before there was an account', () async {
-      // Recorded with no outbox at all — the guest case.
-      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+      final guestStore = guestArchive();
       await guestStore.create(
-          sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
+          sourcePhotoPath: sourcePhoto('a.jpg').path,
+          text: 'one',
+          createdAt: when);
       await guestStore.create(
-          sourcePhotoPath: sourcePhoto('b.jpg').path, text: 'two', createdAt: when);
+          sourcePhotoPath: sourcePhoto('b.jpg').path,
+          text: 'two',
+          createdAt: when);
       expect(outbox.pending, isEmpty);
 
-      await outbox.adoptExisting(guestStore.entries);
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
 
       expect(outbox.pending.length, 2);
       expect(outbox.pendingPhotoUploads.length, 2);
     });
 
     test('runs once, so relaunching never re-uploads the archive', () async {
-      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+      final guestStore = guestArchive();
       final entry = await guestStore.create(
-          sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
+          sourcePhotoPath: sourcePhoto('a.jpg').path,
+          text: 'one',
+          createdAt: when);
 
-      await outbox.adoptExisting(guestStore.entries);
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
       await outbox.forget(outbox.pending);
       await outbox.markPhotoUploaded(entry.syncPhotoName);
 
       // Every subsequent launch calls this again.
-      await outbox.adoptExisting(guestStore.entries);
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
 
       expect(outbox.pending, isEmpty,
           reason: 'a second adoption would re-push the whole archive');
       expect(outbox.pendingPhotoUploads, isEmpty,
-          reason: 'and would re-upload every photo, which is the expensive half');
+          reason:
+              'and would re-upload every photo, which is the expensive half');
     });
 
-    test('a reset clears the guard so the next account adopts afresh', () async {
-      final guestStore = EntryStore.forTest(entriesBox, photosRoot: photosRoot);
+    test('a second account on the same phone adopts nothing', () async {
+      final guestStore = guestArchive();
       await guestStore.create(
-          sourcePhotoPath: sourcePhoto('a.jpg').path, text: 'one', createdAt: when);
-      await outbox.adoptExisting(guestStore.entries);
+          sourcePhotoPath: sourcePhoto('a.jpg').path,
+          text: 'one',
+          createdAt: when);
+      await signInAdoptAndOut(guestStore);
 
-      await outbox.reset();
-      await outbox.adoptExisting(guestStore.entries);
+      await outbox.adoptExisting(guestStore.entries, userId: accountB);
 
+      // These entries are A's. Adopting them here is how one person's photos
+      // end up in another person's account on a shared or resold phone.
+      expect(outbox.pending, isEmpty);
+      expect(outbox.pendingPhotoUploads, isEmpty);
+      // They stay on the device, though: signing out must not cost anyone
+      // photos that were never backed up.
+      expect(guestStore.entries.length, 1);
+    });
+
+    test('signing back into the same account adopts nothing', () async {
+      final guestStore = guestArchive();
+      await guestStore.create(
+          sourcePhotoPath: sourcePhoto('a.jpg').path,
+          text: 'one',
+          createdAt: when);
+      await signInAdoptAndOut(guestStore);
+
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
+
+      // The server already has them; the pull that follows brings back
+      // anything this device is missing.
+      expect(outbox.pending, isEmpty);
+      expect(outbox.pendingPhotoUploads, isEmpty);
+      expect(outbox.accountId, accountA);
+    });
+
+    test('a queue left by the previous account never reaches the next one',
+        () async {
+      final guestStore = guestArchive();
+      await guestStore.create(
+          sourcePhotoPath: sourcePhoto('a.jpg').path,
+          text: 'one',
+          createdAt: when);
+      await outbox.adoptExisting(guestStore.entries, userId: accountA);
+      await outbox.setCursor(9);
       expect(outbox.pending.length, 1);
+
+      // No reset in between — a sign-out killed mid-write, or a crash.
+      await outbox.adoptExisting(guestStore.entries, userId: accountB);
+
+      expect(outbox.pending, isEmpty, reason: "those ops are A's");
+      expect(outbox.pendingPhotoUploads, isEmpty);
+      // A's cursor would have made B skip its own log from the start.
+      expect(outbox.cursor, 0);
+      expect(outbox.accountId, accountB);
+    });
+  });
+
+  group('ops the server would reject', () {
+    /// An entry as a torn Hive record reads back: every cast in EntryAdapter
+    /// softens to a default, so a bad row becomes id: '' / text: ''.
+    Entry torn() => Entry(id: '', localPath: '', text: '', createdAt: when);
+
+    test('an unsendable entry is dropped instead of blocking the queue',
+        () async {
+      await outbox.enqueueCreate(torn());
+      // The server 400s a push on its first bad op, so the entry that follows
+      // would never reach it either.
+      final good = await record();
+
+      expect(outbox.pending.map((o) => o.entryId), [good.id]);
+      expect(outbox.pendingPhotoUploads, {good.syncPhotoName});
+    });
+
+    test('an entry with more tags than the server accepts is dropped',
+        () async {
+      final entry = Entry(
+        id: '88888888-8888-4888-8888-888888888888',
+        localPath: '88888888-8888-4888-8888-888888888888.jpg',
+        text: 'a shelf for everything',
+        createdAt: when,
+        // normalizeTags caps each tag's length but never how many there are.
+        tags: [for (var i = 0; i < 40; i++) 'tag$i'],
+      );
+
+      await outbox.enqueueCreate(entry);
+
+      expect(outbox.pending, isEmpty);
+      expect(outbox.pendingPhotoUploads, isEmpty);
+    });
+
+    test('a photo extension the server will not store is dropped', () {
+      final entry = Entry(
+        id: '99999999-9999-4999-8999-999999999999',
+        localPath: '/old/container/Documents/photos/whatever.gif',
+        text: 'a moving picture',
+        createdAt: when,
+      );
+
+      expect(syncOpProblem(SyncOp.create(entry)), isNotNull);
+      expect(
+          syncOpProblem(SyncOp.create(remoteEntry(
+            '99999999-9999-4999-8999-999999999999',
+          ))),
+          isNull);
+    });
+
+    test('an op queued before this check existed is skipped, then swept',
+        () async {
+      // Straight into the box, the way an older build would have written it.
+      final legacyOps = await Hive.openBox('legacy_ops');
+      await legacyOps.put(
+        'create:',
+        jsonEncode({
+          'type': 'create',
+          'entryId': '',
+          'payload': {
+            'id': '',
+            'text': '',
+            'createdAt': when.millisecondsSinceEpoch,
+            'tags': <String>[],
+            'photoName': '.jpg',
+          },
+        }),
+      );
+      final legacy = SyncOutbox.forTest(
+        legacyOps,
+        await Hive.openBox('legacy_meta'),
+        await Hive.openBox('legacy_photos'),
+      );
+
+      expect(legacy.pending, isEmpty,
+          reason: 'sending it would 400 the whole batch, forever');
+
+      // Nothing will ever push it, so nothing would ever forget it — and the
+      // backup line would sit at "1 waiting" for the life of the install.
+      await legacy.forget(const []);
+      expect(legacy.pendingCount, 0);
     });
   });
 
@@ -324,11 +411,62 @@ void main() {
       expect(api.log.where((r) => r.op.type == SyncOpType.create).length, 1);
       expect(outbox.pending, isEmpty);
     });
+
+    test('a queue bigger than one request still gets through', () async {
+      // The guest case: an archive recorded before there was an account, all
+      // of it adopted at sign-in.
+      for (var i = 0; i < 600; i++) {
+        await outbox.enqueueCreate(remoteEntry(bulkId(i)));
+      }
+      api.maxOpsPerPush = 500; // the server's real cap
+
+      final result = await sync.syncNow();
+
+      // Sent whole, this was a 400 on every pass forever — the archive would
+      // never have been backed up at all.
+      expect(result.ok, isTrue);
+      expect(result.pushed, 600);
+      expect(api.pushCalls, 3, reason: '600 ops in chunks of 250');
+      expect(outbox.pending, isEmpty);
+    });
+
+    test('a chunk is only forgotten after the server acks that chunk',
+        () async {
+      for (var i = 0; i < 400; i++) {
+        await outbox.enqueueCreate(remoteEntry(bulkId(i)));
+      }
+      // Accepts the first chunk, then the session lapses mid-queue.
+      api.rejectPushAfter = 1;
+
+      await sync.syncNow();
+
+      expect(outbox.pending.length, 150,
+          reason: 'the un-acked chunk is still owed, and only that one');
+    });
+
+    test('a failing push no longer blocks the pull', () async {
+      const arrived = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+      await record();
+      api.seedRemote(SyncOp.create(remoteEntry(arrived)));
+      // The server refuses this device's op, every time.
+      api.maxOpsPerPush = 0;
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isFalse, reason: 'the push failure is still surfaced');
+      expect(result.error, isA<SyncApiException>());
+      // The point: one op the server keeps refusing used to mean nothing from
+      // any other device ever arrived again.
+      expect(store.byId(arrived), isNotNull);
+      expect(result.pulled, 1);
+      expect(outbox.pending.length, 1, reason: 'still owed, still queued');
+    });
   });
 
   group('pull', () {
     test('applies another device\'s create', () async {
-      api.seedRemote(SyncOp.create(remoteEntry('33333333-3333-4333-8333-333333333333')));
+      api.seedRemote(
+          SyncOp.create(remoteEntry('33333333-3333-4333-8333-333333333333')));
 
       final result = await sync.syncNow();
 
@@ -340,7 +478,8 @@ void main() {
     });
 
     test('a pulled op does NOT bounce back into the outbox', () async {
-      api.seedRemote(SyncOp.create(remoteEntry('44444444-4444-4444-8444-444444444444')));
+      api.seedRemote(
+          SyncOp.create(remoteEntry('44444444-4444-4444-8444-444444444444')));
 
       await sync.syncNow();
 
@@ -362,7 +501,8 @@ void main() {
     });
 
     test('a delete for an entry we never had is harmless', () async {
-      api.seedRemote(const SyncOp.delete('55555555-5555-4555-8555-555555555555'));
+      api.seedRemote(
+          const SyncOp.delete('55555555-5555-4555-8555-555555555555'));
 
       final result = await sync.syncNow();
 
@@ -381,9 +521,11 @@ void main() {
 
     test('pages through a log longer than one request', () async {
       for (var i = 0; i < 5; i++) {
-        api.seedRemote(SyncOp.create(remoteEntry('6666666$i-6666-4666-8666-666666666666')));
+        api.seedRemote(SyncOp.create(
+            remoteEntry('6666666$i-6666-4666-8666-666666666666')));
       }
-      final paged = SyncService(api: api, outbox: outbox, store: store, pageLimit: 2);
+      final paged =
+          SyncService(api: api, outbox: outbox, store: store, pageLimit: 2);
 
       final result = await paged.syncNow();
 
@@ -391,13 +533,75 @@ void main() {
       expect(store.entries.length, 5);
       expect(outbox.cursor, 5);
     });
+
+    test('a page that claims more without advancing stops the loop', () async {
+      // A server answering the same seq to the same question: the cursor can
+      // never move past it (setCursor ignores anything not greater), so
+      // hasMore alone would keep asking until the 1000-round guard.
+      api.stuckAtSeq = 5;
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isTrue);
+      expect(api.pullCalls, lessThanOrEqualTo(2),
+          reason: 'one more request to see the seq stood still, then stop');
+      expect(outbox.cursor, 5);
+    });
+
+    test('an op this build cannot read does not strand the ones behind it',
+        () async {
+      const broken = 'cccccccc-1111-4111-8111-111111111111';
+      const good = 'cccccccc-2222-4222-8222-222222222222';
+      // A create whose payload this build can't turn into an Entry.
+      api.seedRemote(const SyncOp(
+        type: SyncOpType.create,
+        entryId: broken,
+        payload: <String, Object?>{'id': broken},
+      ));
+      api.seedRemote(SyncOp.create(remoteEntry(good)));
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isTrue);
+      expect(store.byId(good), isNotNull,
+          reason: 'the readable op still lands');
+      // The cursor is the part that matters: stuck behind an op that can never
+      // be read, this device would re-fetch and re-fail the same page forever
+      // and never see another change from any device again.
+      expect(outbox.cursor, 2);
+    });
+
+    test('a pass abandoned mid-flight writes nothing after the sign-out',
+        () async {
+      const id = 'cccccccc-3333-4333-8333-333333333333';
+      api.seedRemote(SyncOp.create(remoteEntry(id)));
+      api.pullGate = Completer<void>();
+
+      final pass = sync.syncNow();
+      await pumpEventQueue();
+      expect(api.pullCalls, 1, reason: 'the pass is parked inside the pull');
+
+      // Signing out disposes this service and resets the boxes underneath it,
+      // while the request it is waiting on is still in the air.
+      sync.dispose();
+      api.pullGate!.complete();
+      final result = await pass;
+
+      // Everything below would otherwise have been the previous account's
+      // data landing in the next user's archive.
+      expect(result.pulled, 0);
+      expect(store.byId(id), isNull);
+      expect(outbox.cursor, 0);
+      expect(outbox.lastSyncedAt, isNull);
+    });
   });
 
   group('the cursor rule', () {
     test("a push never advances the cursor past another device's earlier op",
         () async {
       // Another device wrote first (seq 1) and this device has not seen it.
-      api.seedRemote(SyncOp.create(remoteEntry('77777777-7777-4777-8777-777777777777')));
+      api.seedRemote(
+          SyncOp.create(remoteEntry('77777777-7777-4777-8777-777777777777')));
       // This device records its own entry, which will land at seq 2.
       final mine = await record();
 
@@ -438,6 +642,27 @@ void main() {
       expect(onDisk.readAsBytesSync(), [1, 2, 3, 4]);
     });
 
+    test('a download landing after dispose is not written', () async {
+      // The one write the mutation probe found unguarded by test: delete the
+      // generation check before writePhotoBytes and nothing noticed. A pass
+      // abandoned mid-download must not land the previous account's photo in
+      // whatever archive is current by the time the bytes arrive.
+      const id = '10101010-1010-4010-8010-101010101010';
+      api.seedRemote(SyncOp.create(remoteEntry(id)));
+      api.photos['$id.jpg'] = Uint8List.fromList([9, 9, 9]);
+      api.downloadGate = Completer<void>();
+
+      final pass = sync.syncNow();
+      // Let the pass reach the gated download before pulling the rug.
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      sync.dispose();
+      api.downloadGate!.complete();
+      await pass;
+
+      expect(File(p.join(photosRoot, '$id.jpg')).existsSync(), isFalse);
+    });
+
     test('an entry whose photo the other device has not uploaded yet is fine',
         () async {
       const id = '99999999-9999-4999-8999-999999999999';
@@ -460,6 +685,98 @@ void main() {
       expect(result.ok, isTrue);
       expect(result.photosUploaded, 0);
       expect(outbox.pendingPhotoUploads, isEmpty);
+    });
+
+    test('a photo the server will never accept stops holding up the rest',
+        () async {
+      final refused = await record(text: 'a photo too big to store');
+      final ordinary = await record(text: 'a flat white');
+      api.uploadRejections[refused.syncPhotoName] = 413;
+
+      final result = await sync.syncNow();
+
+      // The records reached the server; only one photo didn't. Calling that a
+      // failed sync tells the user their backup is broken when it isn't.
+      expect(result.ok, isTrue);
+      expect(result.photosUploaded, 1);
+      expect(api.photos.keys, contains(ordinary.syncPhotoName));
+      expect(outbox.lastSyncedAt, isNotNull);
+      expect(outbox.pendingPhotoUploads, isEmpty);
+
+      await sync.syncNow();
+
+      // Queued, it would be retried first on every pass and every photo behind
+      // it would wait on a rejection that can never resolve.
+      expect(api.uploadAttempts.where((n) => n == refused.syncPhotoName).length,
+          1);
+    });
+
+    test('a photo the server merely fumbled stays queued for next time',
+        () async {
+      final entry = await record();
+      api.uploadRejections[entry.syncPhotoName] = 500;
+
+      final result = await sync.syncNow();
+
+      expect(result.ok, isTrue);
+      expect(outbox.pendingPhotoUploads, {entry.syncPhotoName},
+          reason:
+              'a 500 is the server having a bad day, not refusing the file');
+    });
+
+    test('a photo is not offered before its record has reached the server',
+        () async {
+      // The photo phase runs even when the push failed. The server answers
+      // 409 for a photo whose entry it has never heard of, and a 4xx used to
+      // read as "give up on this one" — so one bad push dropped the photo from
+      // the queue for good while its record synced fine on the next pass.
+      final entry = await record();
+      api.rejectPushAfter = 0; // every push fails this pass
+      api.uploadRejections[entry.syncPhotoName] = 409;
+
+      final first = await sync.syncNow();
+
+      expect(first.ok, isFalse, reason: 'the push failure is still reported');
+      expect(api.uploadAttempts, isNot(contains(entry.syncPhotoName)),
+          reason: 'no point asking while the create op is still queued');
+      expect(outbox.pendingPhotoUploads, {entry.syncPhotoName});
+
+      api.rejectPushAfter = null;
+      api.uploadRejections.remove(entry.syncPhotoName);
+      final second = await sync.syncNow();
+
+      expect(second.ok, isTrue);
+      expect(api.photos.keys, contains(entry.syncPhotoName));
+      expect(outbox.pendingPhotoUploads, isEmpty);
+    });
+
+    test('a 409 keeps the photo queued even if the record was pushed',
+        () async {
+      // Belt to the braces above: if the server ever 409s for a reason the
+      // client did not anticipate, the photo must wait, not vanish.
+      final entry = await record();
+      api.uploadRejections[entry.syncPhotoName] = 409;
+
+      await sync.syncNow();
+
+      expect(outbox.pendingPhotoUploads, {entry.syncPhotoName});
+    });
+
+    test('downloads are bounded per pass, and the rest arrive next time',
+        () async {
+      for (var i = 0; i < 30; i++) {
+        final id = bulkId(i);
+        api.seedRemote(SyncOp.create(remoteEntry(id)));
+        api.photos['$id.jpg'] = Uint8List.fromList([i]);
+      }
+
+      final first = await sync.syncNow();
+      final second = await sync.syncNow();
+
+      // Sequential requests with a 30-second timeout each: unbounded, a fresh
+      // install would hold one pass open for hours.
+      expect(first.photosDownloaded, 25);
+      expect(second.photosDownloaded, 5);
     });
 
     test('a downloaded photo is not fetched again on the next sync', () async {
@@ -499,7 +816,8 @@ void main() {
 
       expect(api.pushCalls, callsAfterFirst,
           reason: 'a lapsed session must not keep generating requests');
-      expect(callsAfterFirst, 1, reason: 'the first attempt did reach the server');
+      expect(callsAfterFirst, 1,
+          reason: 'the first attempt did reach the server');
     });
 
     test('keeps the queue and the archive intact', () async {

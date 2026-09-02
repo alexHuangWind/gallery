@@ -1,24 +1,17 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:iprefer/models/entry.dart';
 
+import 'support/harness.dart';
+
 void main() {
-  late Directory tempDir;
+  late TestEnv env;
 
-  setUp(() {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) {
-      Hive.registerAdapter(EntryAdapter());
-    }
+  setUp(() async {
+    env = await TestEnv.create('iprefer_test');
   });
 
-  tearDown(() async {
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-  });
+  tearDown(() => env.dispose());
 
   test('Entry survives a Hive round-trip with a location', () async {
     final box = await Hive.openBox<Entry>('entries_test');
@@ -36,7 +29,8 @@ void main() {
     await box.put(original.id, original);
     await box.close();
 
-    final restored = (await Hive.openBox<Entry>('entries_test')).get('abc-123')!;
+    final restored =
+        (await Hive.openBox<Entry>('entries_test')).get('abc-123')!;
 
     expect(restored.id, original.id);
     expect(restored.localPath, original.localPath);
@@ -71,5 +65,4 @@ void main() {
     // An unlocated entry must never satisfy a proximity test.
     expect(restored.metresTo(-37.7983, 144.9784), double.infinity);
   });
-
 }

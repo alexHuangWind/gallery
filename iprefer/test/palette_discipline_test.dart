@@ -11,7 +11,9 @@ import 'package:flutter_test/flutter_test.dart';
 const _overImagery = {
   // Every colour here sits on the photo itself. The card is also the export
   // artifact — a shared PNG must look the same whatever the sender's phone
-  // was set to.
+  // was set to. The same argument covers the card's type: it renders under
+  // MediaQuery.withNoTextScaling, so the sender's accessibility setting can't
+  // reach the lockup either. See test/preference_card_test.dart.
   'lib/widgets/preference_card.dart',
   // Pin borders, the location dot, and the OSM attribution sit on map tiles,
   // which are always the light raster set.

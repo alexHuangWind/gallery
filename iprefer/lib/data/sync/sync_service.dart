@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
 import '../../models/entry.dart';
 import '../entry_store.dart';
 import 'sync_api.dart';
+import 'sync_limits.dart';
 import 'sync_op.dart';
 import 'sync_outbox.dart';
 
@@ -61,6 +63,19 @@ class SyncService extends ChangeNotifier {
   /// be pending; notifying then throws.
   bool _disposed = false;
 
+  /// Bumped by [dispose]. Not notification bookkeeping — this is what stops an
+  /// abandoned pass from *writing*.
+  ///
+  /// Sign-out disposes this service and resets the boxes, but the pass already
+  /// in flight keeps going: its awaits resume against the next account's
+  /// outbox and store, and it happily lands the previous account's entries,
+  /// cursor and "backed up just now" in a stranger's archive. So every await
+  /// in a pass is followed by a generation check, and a pass that finds itself
+  /// out of date stops without writing anything.
+  int _generation = 0;
+
+  bool _abandoned(int generation) => generation != _generation;
+
   void _notify() {
     if (!_disposed) notifyListeners();
   }
@@ -68,6 +83,7 @@ class SyncService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _generation++;
     _outbox.removeListener(_onOutboxChanged);
     super.dispose();
   }
@@ -92,6 +108,7 @@ class SyncService extends ChangeNotifier {
 
   bool get enabled => _api != null;
   bool get syncing => _syncing;
+
   /// Read from storage, so it survives a relaunch and a service swap.
   DateTime? get lastSyncedAt => _outbox.lastSyncedAt;
   Object? get lastError => _lastError;
@@ -100,7 +117,9 @@ class SyncService extends ChangeNotifier {
   bool get needsReauth => _needsReauth;
 
   /// Pending local changes, for a "not backed up yet" hint in the UI.
-  int get pendingCount => _outbox.pending.length;
+  // The outbox's own count, not `pending.length`: `pending` JSON-decodes every
+  // row, and the backup line reads this from build on every keystroke.
+  int get pendingCount => _outbox.pendingCount;
 
   /// Only ever read from inside a pass that [syncNow] has already gated on
   /// `_api != null`. A final field can't be promoted across method calls, so
@@ -113,12 +132,17 @@ class SyncService extends ChangeNotifier {
     // keeps the UI claiming it is trying.
     if (_api == null || _needsReauth) return const SyncResult();
 
+    // A service that has been replaced must not start a pass at all: whatever
+    // it wrote would land in the account that replaced it.
+    if (_disposed) return const SyncResult();
+
     // One pass at a time. A second caller (resume, manual tap, a save landing
     // mid-run) would otherwise push the same ops twice and race the cursor.
     if (_syncing) return const SyncResult();
     _syncing = true;
     _notify();
 
+    final generation = _generation;
     var pushed = 0;
     var pulled = 0;
     var uploaded = 0;
@@ -126,11 +150,41 @@ class SyncService extends ChangeNotifier {
     Object? failure;
 
     try {
-      pushed = await _push();
-      pulled = await _pull();
-      final photos = await _syncPhotos();
-      uploaded = photos.$1;
-      downloaded = photos.$2;
+      // A failed push must not also cost us the pull. One op the server keeps
+      // refusing would otherwise block every change from every other device
+      // forever, because push and pull shared a single try.
+      Object? pushFailure;
+      try {
+        pushed = await _push(generation);
+      } on SyncAuthExpiredException {
+        rethrow; // nothing else in this pass can work either
+      } catch (e) {
+        pushFailure = e;
+      }
+      if (_abandoned(generation)) return const SyncResult();
+
+      pulled = await _pull(generation);
+      if (_abandoned(generation)) return const SyncResult();
+
+      final photos = await _syncPhotos(generation);
+      if (_abandoned(generation)) return const SyncResult();
+      uploaded = photos.uploaded;
+      downloaded = photos.downloaded;
+
+      // Reported only now, after the pull it must not have blocked.
+      if (pushFailure != null) throw pushFailure;
+
+      // Photos that failed do not hold this back. The records are the archive;
+      // a photo still in the queue is a smaller, self-healing problem, and
+      // calling the whole pass a failure tells the user their backup is broken
+      // when the part that matters went through.
+      if (photos.failed > 0) {
+        debugPrint(
+            'sync: records synced, ${photos.failed} photo(s) will retry');
+      }
+      // The outbox is shared across account swaps, so even this last stamp
+      // must not land for a pass that was abandoned mid-flight.
+      if (_abandoned(generation)) return const SyncResult();
       await _outbox.recordSyncedNow();
       _lastError = null;
     } on SyncAuthExpiredException catch (e) {
@@ -160,33 +214,57 @@ class SyncService extends ChangeNotifier {
     );
   }
 
-  /// Sends the outbox. Ops are only forgotten after the server has them, so a
-  /// dropped response costs one duplicate push, which the server ignores.
-  Future<int> _push() async {
+  /// Sends the outbox, a chunk at a time. Ops are only forgotten after the
+  /// server has them, so a dropped response costs one duplicate push, which
+  /// the server ignores.
+  ///
+  /// Chunked because the server refuses more than [kMaxOpsPerPush]'s worth in
+  /// one body: sending the whole queue meant a guest with a few hundred
+  /// entries got a 400 on every pass and could never sync anything, ever.
+  Future<int> _push(int generation) async {
     final ops = _outbox.pending;
     if (ops.isEmpty) return 0;
 
-    await _live.push(ops);
-    await _outbox.forget(ops);
-    return ops.length;
+    var pushed = 0;
+    for (var start = 0; start < ops.length; start += kMaxOpsPerPush) {
+      final chunk =
+          ops.sublist(start, math.min(start + kMaxOpsPerPush, ops.length));
+      await _live.push(chunk);
+      if (_abandoned(generation)) return pushed;
+      // Per chunk, and only after its own ack: forgetting the whole queue on
+      // the first response would drop ops the server never saw when a later
+      // chunk fails.
+      await _outbox.forget(chunk);
+      if (_abandoned(generation)) return pushed;
+      pushed += chunk.length;
+    }
+    return pushed;
   }
 
   /// Reads the log forward from our cursor and applies what we haven't seen.
-  Future<int> _pull() async {
+  Future<int> _pull(int generation) async {
     var applied = 0;
     var guard = 0;
 
     while (true) {
-      final page = await _live.pull(since: _outbox.cursor, limit: pageLimit);
+      final since = _outbox.cursor;
+      final page = await _live.pull(since: since, limit: pageLimit);
+      if (_abandoned(generation)) return applied;
+
       for (final remote in page.ops) {
-        await _apply(remote.op);
-        applied++;
+        if (await _apply(remote.op, generation)) applied++;
+        if (_abandoned(generation)) return applied;
       }
       // Advance only from what the server actually returned — the cursor is
       // the one piece of state that must never run ahead of what we applied.
       await _outbox.setCursor(page.seq);
+      if (_abandoned(generation)) return applied;
 
       if (!page.hasMore || page.ops.isEmpty) break;
+      // A page whose seq didn't pass the cursor leaves `since` unchanged, so
+      // the next request asks the identical question and gets the identical
+      // answer. hasMore alone would spin that all the way to the guard.
+      if (page.seq <= since) break;
       // A server that always claims hasMore must not spin us forever.
       if (++guard > 1000) break;
     }
@@ -196,37 +274,111 @@ class SyncService extends ChangeNotifier {
   /// Applies a remote op WITHOUT re-enqueueing it. Routing these through the
   /// ordinary create/delete would put the op straight back in the outbox and
   /// bounce it to the server forever.
-  Future<void> _apply(SyncOp op) async {
-    switch (op.type) {
-      case SyncOpType.create:
-        final payload = op.payload;
-        if (payload == null) return;
-        // Idempotent: replaying a create for an entry we already hold is a
-        // no-op, which is what makes re-receiving our own ops harmless.
-        if (_store.byId(op.entryId) != null) return;
-        await _store.applyRemoteCreate(Entry.fromSyncJson(payload));
-      case SyncOpType.delete:
-        await _store.applyRemoteDelete(op.entryId);
+  ///
+  /// False only when the op could not be read at all.
+  Future<bool> _apply(SyncOp op, int generation) async {
+    try {
+      switch (op.type) {
+        case SyncOpType.create:
+          final payload = op.payload;
+          if (payload == null) break;
+          // Idempotent: replaying a create for an entry we already hold is a
+          // no-op, which is what makes re-receiving our own ops harmless.
+          if (_store.byId(op.entryId) != null) break;
+          final entry = Entry.fromSyncJson(payload);
+          if (_abandoned(generation)) break;
+          await _store.applyRemoteCreate(entry);
+        case SyncOpType.delete:
+          if (_abandoned(generation)) break;
+          await _store.applyRemoteDelete(op.entryId);
+      }
+      return true;
+    } catch (e) {
+      // One op this build can't read must not strand the cursor behind it.
+      // Letting it throw meant the same page was re-fetched and re-failed on
+      // every pass, so every *later* op — including the readable ones — never
+      // arrived. Skipping costs one entry; stopping costs all of them.
+      debugPrint(
+          'sync: skipping unreadable op ${op.type.name}:${op.entryId} ($e)');
+      return false;
     }
   }
 
   /// Photos move separately from records: they are ~10,000x bigger, and an
   /// entry is useful (searchable, on the map, in recall) before its photo
   /// lands.
-  Future<(int, int)> _syncPhotos() async {
+  ///
+  /// Every photo is attempted on its own. One bad file used to abort the pass
+  /// after the records had already synced, which meant the sync was never
+  /// recorded as done and the UI told the user their backup was unreachable
+  /// while their archive was, in fact, safe on the server.
+  /// The entry a photo belongs to: names are always `<entryId>.<ext>`
+  /// (see Entry.syncPhotoName).
+  static String _entryIdOf(String photoName) {
+    final dot = photoName.lastIndexOf('.');
+    return dot > 0 ? photoName.substring(0, dot) : photoName;
+  }
+
+  Future<({int uploaded, int downloaded, int failed})> _syncPhotos(
+      int generation) async {
     var uploaded = 0;
     var downloaded = 0;
+    var failed = 0;
+
+    ({int uploaded, int downloaded, int failed}) tally() =>
+        (uploaded: uploaded, downloaded: downloaded, failed: failed);
+
+    // Entries whose create op the server has not acknowledged yet. The photo
+    // phase runs even when the push failed, and the server refuses a photo
+    // for an entry it has never heard of (409). Without this, that refusal
+    // would read as "the server will never take this one" below and the photo
+    // would be dropped from the queue for good — while its create op syncs
+    // fine on the next pass, leaving a record on the server permanently
+    // without its picture.
+    final unpushed = {
+      for (final op in _outbox.pending)
+        if (op.type == SyncOpType.create) op.entryId,
+    };
 
     // Up: whatever this device recorded and hasn't shipped.
     for (final name in _outbox.pendingPhotoUploads) {
+      if (_abandoned(generation)) return tally();
+      if (unpushed.contains(_entryIdOf(name))) {
+        failed++; // still queued; it goes up once its record has
+        continue;
+      }
       final bytes = await _store.readPhotoBytes(name);
+      if (_abandoned(generation)) return tally();
       if (bytes == null) {
         // The file is gone (a delete raced us, or the OS reclaimed it).
         // Nothing to send, and nothing to keep waiting for.
         await _outbox.markPhotoUploaded(name);
         continue;
       }
-      await _live.uploadPhoto(name, bytes);
+      try {
+        await _live.uploadPhoto(name, bytes);
+      } on SyncAuthExpiredException {
+        rethrow; // the session, not the photo — the pass has to stop
+      } catch (e) {
+        if (_abandoned(generation)) return tally();
+        // 409 is "push the entry first", a precondition that the next pass
+        // meets — never a verdict on the photo. It is excluded from the
+        // permanent set for the same reason the unpushed check exists above:
+        // dropping the photo here loses it from the backup for good.
+        if (e is SyncApiException && e.isPermanent && e.statusCode != 409) {
+          // The server will never take this one (too big, wrong name). It is
+          // retried first on every pass, so leaving it queued means every
+          // photo behind it waits on a failure that cannot resolve. Drop it:
+          // the entry and its local photo are untouched.
+          debugPrint(
+              'sync: giving up on photo $name, the server refused it ($e)');
+          await _outbox.markPhotoUploaded(name);
+        } else {
+          failed++;
+        }
+        continue;
+      }
+      if (_abandoned(generation)) return tally();
       await _outbox.markPhotoUploaded(name);
       uploaded++;
     }
@@ -235,14 +387,33 @@ class SyncService extends ChangeNotifier {
     // filesystem rather than a queue, so it self-heals — an interrupted
     // download, or a fresh install that pulled records first, simply looks
     // like a missing file next time.
+    var attempts = 0;
     for (final entry in _store.entries) {
+      if (_abandoned(generation)) return tally();
+      // Self-healing is what makes a bound safe: the rest are still missing
+      // next pass, and stopping keeps one pass from running for hours.
+      if (attempts >= kMaxPhotoDownloadsPerPass) break;
       if (_store.hasPhoto(entry)) continue;
-      final bytes = await _live.downloadPhoto(entry.syncPhotoName);
+
+      final Uint8List? bytes;
+      attempts++;
+      try {
+        bytes = await _live.downloadPhoto(entry.syncPhotoName);
+      } on SyncAuthExpiredException {
+        rethrow;
+      } catch (e) {
+        // The file still looks missing next pass, so counting it is all this
+        // has to do — and the entries after it still get their turn.
+        debugPrint('sync: photo ${entry.syncPhotoName} did not arrive ($e)');
+        failed++;
+        continue;
+      }
+      if (_abandoned(generation)) return tally();
       if (bytes == null) continue; // not uploaded yet by the other device
       await _store.writePhotoBytes(entry.syncPhotoName, bytes);
       downloaded++;
     }
 
-    return (uploaded, downloaded);
+    return tally();
   }
 }

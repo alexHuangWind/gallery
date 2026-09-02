@@ -1,15 +1,13 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
 
-import '../data/archive_export.dart';
+import '../data/archive_export_runner.dart';
 import '../data/archive_view.dart';
 import '../data/entry_store.dart';
 import '../data/session.dart';
+import '../data/sync/sync_service.dart';
 import '../theme.dart';
 import 'archive_screen.dart';
 import 'compose_screen.dart';
@@ -36,6 +34,16 @@ class _HomeShellState extends State<HomeShell> {
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
 
+  /// The shared view, held so [_syncField] can be attached to and detached
+  /// from it.
+  ///
+  /// Read with `context.read`, i.e. without subscribing: the app builds exactly
+  /// one [ArchiveView] as a field of its root state and hands the same instance
+  /// out for the process's lifetime (see `main.dart`), so there is no swap to
+  /// miss. A listening read would subscribe this whole shell to the view and
+  /// rebuild the bar, both tabs and the FAB on every keystroke of a search —
+  /// paying for a rebuild path that cannot happen. The identity check below is
+  /// what would catch it if that construction ever changed.
   ArchiveView? _view;
 
   @override
@@ -79,81 +87,179 @@ class _HomeShellState extends State<HomeShell> {
   /// that silently does nothing.
   bool _exporting = false;
 
+  final ArchiveExportRunner _exportRunner = ArchiveExportRunner();
+
   Future<void> _export() async {
     if (_exporting) return;
 
     final store = context.read<EntryStore>();
     final messenger = ScaffoldMessenger.of(context);
-
-    if (store.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('nothing to save yet')),
-      );
-      return;
-    }
-
-    // Resolved before the first await. iPad anchors the share sheet to this
-    // rect, and a RenderBox read after an await can be detached — signing out
-    // mid-pack swaps this whole screen out, and asking a detached box for its
-    // position throws, turning a successful export into "couldn't pack your
-    // archive" on the login screen.
+    // Resolved here, before the first await, and passed down. iPad anchors the
+    // share sheet to this rect, and a RenderBox read after an await can be
+    // detached — signing out mid-pack swaps this whole screen out, and asking
+    // a detached box for its position throws, turning a successful export into
+    // "couldn't pack your archive" on the login screen.
     final box = context.findRenderObject() as RenderBox?;
     final origin =
         box == null ? null : box.localToGlobal(Offset.zero) & box.size;
 
     setState(() => _exporting = true);
-    Directory? workDir;
     try {
-      final temp = await getTemporaryDirectory();
-      workDir = Directory(p.join(temp.path, 'export'));
-      final result = await ArchiveExport.pack(
-        entries: store.entries,
-        photosRoot: store.photosRoot,
-        workDir: workDir,
+      await _exportRunner.run(
+        store: store,
         now: DateTime.now(),
-      );
-
-      // Before the sheet, not after: on iOS the share future completes when
-      // the sheet is dismissed, so warning afterwards tells someone who just
-      // cancelled about gaps in a copy they decided not to make.
-      if (result.missingPhotos > 0) {
-        final n = result.missingPhotos;
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              "$n photo${n == 1 ? '' : 's'} "
-              "${n == 1 ? "wasn't" : "weren't"} on this phone — "
-              'the words are still in the copy',
-            ),
-          ),
-        );
-      }
-
-      await Share.shareXFiles(
-        [XFile(result.file.path)],
-        sharePositionOrigin: origin,
-      );
-    } catch (e) {
-      // Recorded, because disk-full, an unreadable photo and a detached
-      // render object all reach the user as this one sentence.
-      debugPrint('export failed: $e');
-      messenger.showSnackBar(
-        const SnackBar(content: Text("couldn't pack your archive — try again")),
+        origin: origin,
+        // Said as it happens rather than from the return value: the missing-
+        // photo warning has to be on screen before the sheet opens.
+        onOutcome: (outcome) {
+          final line = _exportMessage(outcome);
+          if (line != null) {
+            messenger.showSnackBar(SnackBar(content: Text(line)));
+          }
+        },
       );
     } finally {
-      // A whole second copy of the archive, otherwise: this lives in
-      // Library/Caches, which iOS does not reliably reclaim, and share_plus
-      // on Android has already copied what it needs into its own cache. Both
-      // platforms are done with our file by the time this future completes.
-      try {
-        if (workDir != null && workDir.existsSync()) {
-          workDir.deleteSync(recursive: true);
-        }
-      } catch (_) {
-        // Cleanup is best-effort; the next export clears the directory anyway.
-      }
       if (mounted) setState(() => _exporting = false);
     }
+  }
+
+  /// What an export is worth saying out loud. Null for the ordinary success:
+  /// the share sheet appearing is its own confirmation, and a snackbar under
+  /// it would only be read after the moment it belonged to.
+  String? _exportMessage(ExportOutcome outcome) {
+    switch (outcome.status) {
+      case ExportStatus.nothingToSave:
+        return 'nothing to save yet';
+      case ExportStatus.failed:
+        return "couldn't pack your archive — try again";
+      case ExportStatus.packed:
+        final n = outcome.missingPhotos;
+        if (n == 0) return null;
+        return "$n photo${n == 1 ? '' : 's'} "
+            "${n == 1 ? "wasn't" : "weren't"} on this phone — "
+            'the words are still in the copy';
+    }
+  }
+
+  /// True while the account is being deleted — same reason as [_exporting]:
+  /// the item has to look unavailable, or the second tap of an impatient
+  /// double-tap is a control that silently does nothing.
+  bool _deleting = false;
+
+  /// Asks first, then deletes the account and its backup.
+  ///
+  /// App Store Guideline 5.1.1(v). The work itself belongs to the composition
+  /// root (see `AccountDeleter` in main.dart); this screen owns the asking,
+  /// and saying so when it fails.
+  Future<void> _deleteAccount() async {
+    if (_deleting) return;
+
+    final delete = context.read<AccountDeleter>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      // The dialog's own context, like the remove-entry dialog in
+      // archive_screen: a rebuild under an open dialog must not leave the
+      // theme being read off a defunct element.
+      builder: (ctx) => AlertDialog(
+        title: const Text('delete your account?'),
+        content: const Text(
+          'your account and the backup on our server go for good.\n\n'
+          'everything on this phone stays — the entries and photos are still '
+          'here, and you can keep recording without an account.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('keep it')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            // The red is reserved for the choices that cannot be taken back.
+            style: TextButton.styleFrom(foregroundColor: ctx.colors.danger),
+            child: const Text('delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _deleting = true);
+    try {
+      await delete();
+      // Nothing to say on success: the session is gone, and main.dart swaps
+      // this whole screen for the login one. A snackbar would be addressed to
+      // a screen that no longer exists.
+    } catch (e) {
+      debugPrint('deleting the account failed: $e');
+      messenger.showSnackBar(
+        const SnackBar(
+            content: Text("couldn't delete your account — try again")),
+      );
+    } finally {
+      // Unmounted on success, so this only runs on the failure path.
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
+  /// Whether there is an account on a server to delete, as opposed to a local
+  /// guest id. Not `syncEnabled`: a token the server has stopped accepting is
+  /// still the only handle on the account it was issued for, and the deletion
+  /// endpoint takes it (see `Session.deleteAccount`). Hiding the item from a
+  /// lapsed session would be hiding it from the person most likely to want it.
+  static bool _hasAccount(BuildContext context) {
+    final session = context.read<Session>();
+    return session.signedIn && session.syncToken != null;
+  }
+
+  /// Signs out — after giving the queue one chance to reach the server, and
+  /// after asking if it still could not.
+  ///
+  /// Sign-out wipes the outbox (main.dart does it on the signed-in→out edge,
+  /// however sign-out was reached), and nothing syncs between a save and the
+  /// next app resume. So "record something, sign out" — an ordinary sequence
+  /// — used to delete that entry's create op before the server ever saw it,
+  /// silently and for good: the entry stays on the phone but has no way back
+  /// into the queue, since signing back in adopts nothing for an account that
+  /// has synced before. The flush closes the common case; the question covers
+  /// the offline one.
+  Future<void> _signOut() async {
+    final session = context.read<Session>();
+    final sync = context.read<SyncService>();
+
+    if (sync.enabled) {
+      await sync.syncNow();
+      if (!mounted) return;
+      final left = sync.pendingCount;
+      if (left > 0) {
+        final anyway = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(
+                '$left ${left == 1 ? 'entry isn\u2019t' : 'entries aren\u2019t'} backed up yet'),
+            content: const Text(
+              'signing out now drops them from the queue — they stay on this '
+              'phone, but they never reach your backup.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('stay signed in'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: TextButton.styleFrom(foregroundColor: ctx.colors.danger),
+                child: const Text('sign out anyway'),
+              ),
+            ],
+          ),
+        );
+        if (anyway != true || !mounted) return;
+      }
+    }
+    // Clearing what the account left behind — the filter, the sort, the
+    // outbox — belongs to main.dart's session listener, not here.
+    await session.signOut();
   }
 
   void _compose() {
@@ -181,139 +287,157 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        // "I prefer" keeps its capital everywhere it appears as the phrase —
-        // it is the app's name and the card's signature line, not body copy.
-        // The lowercase voice applies to what the app *says*, not to what it
-        // is called. ("places" is body copy, so it stays lowercase.)
-        title: _searching
-            ? _SearchField(
-                controller: _searchController,
-                focusNode: _searchFocus,
-                onChanged: (q) => context.read<ArchiveView>().setQuery(q),
-              )
-            : Text(_tab == 0 ? 'I prefer' : 'places'),
-        leading: _searching
-            ? IconButton(
-                tooltip: 'close search',
-                icon: const Icon(Icons.arrow_back, size: 20),
-                onPressed: _closeSearch,
-              )
-            : null,
-        actions: [
-          if (_searching)
-            // A real app-bar action rather than the field's suffixIcon: as a
-            // suffix it either shrinks below a comfortable hit target or its
-            // 48 pt height sets the row and pushes the text up off the back
-            // arrow's line.
-            //
-            // The slot keeps its width when empty. The title is sized from
-            // whatever `actions` leaves, so appearing and disappearing would
-            // jog the field 40 px sideways on the first and last character.
-            SizedBox(
-              width: 48,
-              child: ValueListenableBuilder<TextEditingValue>(
-                valueListenable: _searchController,
-                builder: (context, value, _) => value.text.isEmpty
-                    ? const SizedBox.shrink()
-                    : IconButton(
-                        tooltip: 'clear',
-                        icon: const Icon(Icons.close, size: 20),
-                        // Empties the query but keeps the field open and
-                        // focused — "search for something else", not "stop
-                        // searching". The controller follows via _syncField.
-                        onPressed: () {
-                          _view?.clearQuery();
-                          _searchFocus.requestFocus();
-                        },
-                      ),
+    return PopScope(
+      // The shell is the root route, so with the field open an Android back
+      // gesture had nothing above it to pop and left the app instead — losing
+      // the timeline to close a search box. Back now means "out of search"
+      // exactly as the arrow does, and only then means "out of the app".
+      canPop: !_searching,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _closeSearch();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          // "I prefer" keeps its capital everywhere it appears as the phrase —
+          // it is the app's name and the card's signature line, not body copy.
+          // The lowercase voice applies to what the app *says*, not to what it
+          // is called. ("places" is body copy, so it stays lowercase.)
+          title: _searching
+              ? _SearchField(
+                  controller: _searchController,
+                  focusNode: _searchFocus,
+                  onChanged: (q) => context.read<ArchiveView>().setQuery(q),
+                )
+              : Text(_tab == 0 ? 'I prefer' : 'places'),
+          leading: _searching
+              ? IconButton(
+                  tooltip: 'close search',
+                  icon: const Icon(Icons.arrow_back, size: 20),
+                  onPressed: _closeSearch,
+                )
+              : null,
+          actions: [
+            if (_searching)
+              // A real app-bar action rather than the field's suffixIcon: as a
+              // suffix it either shrinks below a comfortable hit target or its
+              // 48 pt height sets the row and pushes the text up off the back
+              // arrow's line.
+              //
+              // The slot keeps its width when empty. The title is sized from
+              // whatever `actions` leaves, so appearing and disappearing would
+              // jog the field 40 px sideways on the first and last character.
+              SizedBox(
+                width: 48,
+                child: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _searchController,
+                  builder: (context, value, _) => value.text.isEmpty
+                      ? const SizedBox.shrink()
+                      : IconButton(
+                          tooltip: 'clear',
+                          icon: const Icon(Icons.close, size: 20),
+                          // Empties the query but keeps the field open and
+                          // focused — "search for something else", not "stop
+                          // searching". The controller follows via _syncField.
+                          onPressed: () {
+                            _view?.clearQuery();
+                            _searchFocus.requestFocus();
+                          },
+                        ),
+                ),
               ),
-            ),
-          if (!_searching)
-            IconButton(
-              tooltip: 'search',
-              icon: const Icon(Icons.search, size: 22),
-              onPressed: _openSearch,
-            ),
-          // Load-bearing, not cosmetic: ArchiveView.reset() cannot reach
-          // _searching or the controller, so signing out from an open search
-          // would leave a stale field over a cleared query. Hiding the whole
-          // menu means the only way out of search is _closeSearch.
-          //
-          // A menu rather than a third icon: the bar has to hold the title as
-          // well, and two of these are things you do once in a while, not
-          // controls you want under your thumb.
-          if (!_searching)
-            PopupMenuButton<_Overflow>(
-              tooltip: 'more',
-              icon: const Icon(Icons.more_vert, size: 20),
-              position: PopupMenuPosition.under,
-              onSelected: (item) {
-                switch (item) {
-                  case _Overflow.export:
-                    _export();
-                  case _Overflow.signOut:
-                    // Reset BEFORE signOut: the next user must not inherit
-                    // this one's filter, sort, or last known coordinates.
-                    // This is the only sign-out path today; if another ever
-                    // appears (expiry, revocation), move this pairing into
-                    // main.dart's composition root next to the store→prune
-                    // listener.
-                    context.read<ArchiveView>().reset();
-                    context.read<Session>().signOut();
-                }
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: _Overflow.export,
-                  enabled: !_exporting,
-                  child: Text(
-                    _exporting
-                        ? 'packing your archive…'
-                        : 'save a copy of everything',
+            if (!_searching)
+              IconButton(
+                tooltip: 'search',
+                icon: const Icon(Icons.search, size: 22),
+                onPressed: _openSearch,
+              ),
+            // Load-bearing, not cosmetic: ArchiveView.reset() cannot reach
+            // _searching or the controller, so signing out from an open search
+            // would leave a stale field over a cleared query. Hiding the whole
+            // menu means the only way out of search is _closeSearch.
+            //
+            // A menu rather than a third icon: the bar has to hold the title as
+            // well, and two of these are things you do once in a while, not
+            // controls you want under your thumb.
+            if (!_searching)
+              PopupMenuButton<_Overflow>(
+                tooltip: 'more',
+                icon: const Icon(Icons.more_vert, size: 20),
+                position: PopupMenuPosition.under,
+                onSelected: (item) {
+                  switch (item) {
+                    case _Overflow.export:
+                      _export();
+                    case _Overflow.signOut:
+                      // Not awaited: onSelected is void Function(T), and the
+                      // shell reacts to Session's notification, not to this
+                      // call returning.
+                      unawaited(_signOut());
+                    case _Overflow.deleteAccount:
+                      _deleteAccount();
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: _Overflow.export,
+                    enabled: !_exporting,
+                    child: Text(
+                      _exporting
+                          ? 'packing your archive…'
+                          : 'save a copy of everything',
+                    ),
                   ),
-                ),
-                const PopupMenuItem(
-                  value: _Overflow.signOut,
-                  child: Text('sign out'),
-                ),
-              ],
+                  const PopupMenuItem(
+                    value: _Overflow.signOut,
+                    child: Text('sign out'),
+                  ),
+                  // Only for someone who actually has an account to delete. A
+                  // guest has a local id and nothing on any server, so the item
+                  // would offer to destroy something that was never made —
+                  // read, not watched, because the menu is built when it opens.
+                  if (_hasAccount(context))
+                    PopupMenuItem(
+                      value: _Overflow.deleteAccount,
+                      enabled: !_deleting,
+                      child: Text(_deleting ? 'deleting…' : 'delete account'),
+                    ),
+                ],
+              ),
+          ],
+        ),
+        body: IndexedStack(
+          index: _tab,
+          children: const [ArchiveScreen(), MapScreen()],
+        ),
+        // Kept while searching. "I looked for it, it isn't there, so let me
+        // record it" is exactly the moment compose is wanted, and hiding the
+        // button made reaching it cost the query.
+        //
+        // Bare of colours on purpose: fill and corner come from
+        // floatingActionButtonTheme, because this is the same gesture as a
+        // filled button and should not be able to drift from one.
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _compose,
+          icon: const Icon(Icons.add),
+          label: const Text('record'),
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _tab,
+          onDestinationSelected: (i) => setState(() => _tab = i),
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.schedule_outlined),
+              selectedIcon: Icon(Icons.schedule),
+              label: 'timeline',
             ),
-        ],
-      ),
-      body: IndexedStack(
-        index: _tab,
-        children: const [ArchiveScreen(), MapScreen()],
-      ),
-      // Kept while searching. "I looked for it, it isn't there, so let me
-      // record it" is exactly the moment compose is wanted, and hiding the
-      // button made reaching it cost the query.
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _compose,
-        backgroundColor: context.colors.ink,
-        foregroundColor: context.colors.paper,
-        // 8dp like every real button; the default stadium pill reads as a
-        // chip, and pills mean "selectable filter" everywhere else here.
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        icon: const Icon(Icons.add),
-        label: const Text('record'),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.schedule_outlined),
-            selectedIcon: Icon(Icons.schedule),
-            label: 'timeline',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
-            label: 'map',
-          ),
-        ],
+            NavigationDestination(
+              icon: Icon(Icons.map_outlined),
+              selectedIcon: Icon(Icons.map),
+              label: 'map',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -365,4 +489,4 @@ class _SearchField extends StatelessWidget {
 }
 
 /// The app bar's overflow items.
-enum _Overflow { export, signOut }
+enum _Overflow { export, signOut, deleteAccount }

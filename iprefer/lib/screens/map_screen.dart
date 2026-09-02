@@ -80,7 +80,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   /// build-time call by moving it into a lifecycle hook — the pin set is
   /// derived from providers only available at build time.
   void _fitTo(List<LatLng> points) {
-    final signature = points.map((p) => '${p.latitude},${p.longitude}').join(';');
+    final signature =
+        points.map((p) => '${p.latitude},${p.longitude}').join(';');
     if (signature == _fittedSignature) return;
     _fittedSignature = signature;
 
@@ -178,7 +179,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                           point: LatLng(e.latitude!, e.longitude!),
                           width: 54,
                           height: 54,
-                          child: _EntryPin(entry: e),
+                          child: EntryPin(entry: e),
                         ),
                     ],
                   ),
@@ -210,41 +211,64 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 }
 
-class _EntryPin extends StatelessWidget {
-  const _EntryPin({required this.entry});
+/// One entry as a round photo pin on the map.
+///
+/// Public only so its labelling can be tested: the map itself can't be pumped
+/// in a widget test, because FlutterMap's tile loading never settles.
+class EntryPin extends StatelessWidget {
+  const EntryPin({super.key, required this.entry});
 
   final Entry entry;
 
+  void _open(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => CardScreen(entry: entry)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => CardScreen(entry: entry)),
-      ),
-      child: Container(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2.5),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Image.file(
-          context.read<EntryStore>().fileFor(entry),
-          fit: BoxFit.cover,
-          // The pin is 54 pt; decoding beyond ~3x that is pure memory waste.
-          cacheWidth: 162,
-          // Fixed, like the white border and the shadow above it: the pin
-          // sits on OSM tiles, which are always the light raster set. Reading
-          // the palette here would give two phones different pins for the
-          // same missing photo.
-          errorBuilder: (_, __, ___) =>
-              const ColoredBox(color: Color(0xFF8A8580)),
+    final place = entry.placeLabel;
+
+    // A photo inside a bare GestureDetector: every pin on the map announced
+    // as an unlabelled image, which made the map unusable without sight. Say
+    // what the pin is — the line, where it was, when — and that it opens.
+    return Semantics(
+      button: true,
+      label: [
+        entry.text,
+        if (place != null && place.isNotEmpty) place,
+        quietDate(entry.createdAt),
+      ].join(', '),
+      excludeSemantics: true,
+      onTap: () => _open(context),
+      child: GestureDetector(
+        onTap: () => _open(context),
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Image.file(
+            context.read<EntryStore>().fileFor(entry),
+            fit: BoxFit.cover,
+            // The pin is 54 pt; decoding beyond ~3x that is pure memory waste.
+            cacheWidth: 162,
+            // Fixed, like the white border and the shadow above it: the pin
+            // sits on OSM tiles, which are always the light raster set. Reading
+            // the palette here would give two phones different pins for the
+            // same missing photo.
+            errorBuilder: (_, __, ___) =>
+                const ColoredBox(color: Color(0xFF8A8580)),
+          ),
         ),
       ),
     );

@@ -53,7 +53,8 @@ class _BackupBarState extends State<BackupBar> {
     // if the write ever fails, without this the bar would fall back to
     // "couldn't reach your backup", which is exactly the indistinguishable-
     // from-offline behaviour this whole change exists to remove.
-    final expired = context.watch<Session>().syncTokenExpired || sync.needsReauth;
+    final expired =
+        context.watch<Session>().syncTokenExpired || sync.needsReauth;
 
     // Nothing to promise if the app was built without a backend at all.
     if (!syncConfigured) return const SizedBox.shrink();
@@ -73,7 +74,8 @@ class _BackupBarState extends State<BackupBar> {
             child: Text(
               _message(sync, expired),
               style: TextStyle(
-                color: expired ? context.colors.accentInk : context.colors.muted,
+                color:
+                    expired ? context.colors.accentInk : context.colors.muted,
                 fontSize: 11,
               ),
               overflow: TextOverflow.ellipsis,

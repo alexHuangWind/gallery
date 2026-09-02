@@ -115,7 +115,8 @@ void main() {
     test('matches a query the user typed loosely', () {
       // The chip label and the stored tag both went through normalizeTags, so
       // a filter must still match when the caller did not normalize.
-      expect(entriesWithAnyTag(entries, {'#Wine'}).map((e) => e.id), ['a', 'b']);
+      expect(
+          entriesWithAnyTag(entries, {'#Wine'}).map((e) => e.id), ['a', 'b']);
     });
   });
 }

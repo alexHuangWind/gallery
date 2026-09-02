@@ -36,13 +36,33 @@ interface AppleJwk {
 /// Apple's keys, cached between requests so signing in isn't gated on an
 /// outbound round trip.
 ///
-/// Two independent ways to go stale, both covered: a `kid` we've never seen
-/// forces an immediate refetch (that's how rotation normally appears), and
-/// the whole cache expires on a timer so a long-lived isolate can't hold a
-/// retired key forever. Note we deliberately do NOT refetch on a signature
-/// mismatch — that would let anyone force an outbound request per bad token.
+/// Two independent ways to go stale, both covered: the whole cache expires on
+/// a timer so a long-lived isolate can't hold a retired key forever, and a
+/// `kid` we've never seen triggers an immediate refetch, which is how rotation
+/// normally appears.
+///
+/// That second path is the dangerous one. `/v1/auth/apple` is unauthenticated
+/// and a bogus `kid` costs an attacker nothing to mint, so "refetch on unknown
+/// kid" is an outbound request to appleid.apple.com per unauthenticated POST —
+/// us DoSing Apple on a stranger's behalf. It is therefore rate limited to one
+/// forced refetch per isolate per cooldown; outside that window an unknown kid
+/// is simply "unknown signing key". Genuine rotation still recovers on its
+/// own, one cooldown later, and clients retry sign-in anyway. For the same
+/// reason we deliberately do NOT refetch on a signature mismatch.
 const KEY_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const DEFAULT_REFETCH_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 let cachedKeys: { url: string; keys: AppleJwk[]; fetchedAt: number } | null = null;
+/// Module scope on purpose: the limit has to be per isolate, not per request.
+/// A per-request "we already forced one refetch" flag limits nothing, because
+/// every request starts over with a fresh flag.
+let lastForcedFetchAt = 0;
+
+function forcedRefetchAllowed(env: Env): boolean {
+  // Overridable so the tests can exercise both sides of the window without
+  // sleeping for five minutes. Anything unparseable falls back to the default.
+  const cooldown = Number(env.APPLE_JWKS_REFETCH_COOLDOWN_MS ?? '') || DEFAULT_REFETCH_COOLDOWN_MS;
+  return Date.now() - lastForcedFetchAt >= cooldown;
+}
 
 function b64urlToBytes(value: string): Uint8Array {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -105,9 +125,12 @@ export async function verifyAppleIdentityToken(
   const jwksUrl = env.APPLE_JWKS_URL || DEFAULT_JWKS_URL;
   let keys = await fetchKeys(jwksUrl, false);
   let jwk = keys.find((k) => k.kid === kid);
-  if (!jwk) {
-    // Unknown kid: Apple may have rotated. One forced refetch, then give up —
-    // otherwise a bogus kid turns into an outbound request per attempt.
+  if (!jwk && forcedRefetchAllowed(env)) {
+    // Unknown kid: Apple may have rotated. Refetch once and then hold the door
+    // shut for the cooldown, so a stream of invented kids cannot become a
+    // stream of outbound requests. Stamped *before* the fetch: a key server
+    // that is down or slow must not leave the window open either.
+    lastForcedFetchAt = Date.now();
     keys = await fetchKeys(jwksUrl, true);
     jwk = keys.find((k) => k.kid === kid);
   }

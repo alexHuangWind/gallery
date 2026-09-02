@@ -13,7 +13,8 @@ Entry _at(String id, {double? lat, double? lng}) => Entry(
 void main() {
   group('haversineMetres', () {
     test('is zero for the same point', () {
-      expect(haversineMetres(-37.7983, 144.9784, -37.7983, 144.9784), closeTo(0, 0.001));
+      expect(haversineMetres(-37.7983, 144.9784, -37.7983, 144.9784),
+          closeTo(0, 0.001));
     });
 
     test('matches a known short distance', () {

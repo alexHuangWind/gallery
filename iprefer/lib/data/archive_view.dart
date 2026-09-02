@@ -22,7 +22,9 @@ class ArchiveView extends ChangeNotifier {
   /// [getFix] exists as a seam: production wiring keeps the default (the real
   /// location stack), tests inject a fake to drive the sort state machine
   /// deterministically. It is the only injection point this class needs.
-  ArchiveView({Future<PlaceFix?> Function({bool prompt}) getFix = LocationService.current})
+  ArchiveView(
+      {Future<PlaceFix?> Function({bool prompt}) getFix =
+          LocationService.current})
       : _getFix = getFix;
 
   final Future<PlaceFix?> Function({bool prompt}) _getFix;

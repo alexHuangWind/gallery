@@ -4,3 +4,5 @@ linter:
   rules:
     prefer_single_quotes: true
     avoid_print: false
+    unawaited_futures: true
+    avoid_dynamic_calls: true

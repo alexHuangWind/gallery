@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -87,8 +89,16 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
   /// coping with a missing service; it simply reports `enabled == false` for a
   /// guest, which is a supported way to use the app rather than a degraded one.
   late SyncService _sync;
+  bool _initialised = false;
   String? _syncingAs;
   bool _wasSignedIn = false;
+
+  /// Session changes, run strictly one after another.
+  ///
+  /// The sign-out wipe is a Hive write. Fired and forgotten it could still be
+  /// running when a fast re-sign-in reconfigures sync, and land *after* the
+  /// new account had queued its ops — deleting them.
+  Future<void> _sessionWork = Future<void>.value();
 
   @override
   void initState() {
@@ -109,13 +119,29 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
     final signedIn = widget.session.signedIn;
     // Edge-detected: Session notifies on the way in as well as out, and only
     // a sign-*out* should clear anything.
-    if (_wasSignedIn && !signedIn) {
-      _view.reset();
-      // The next account must not inherit this one's queue, cursor, or the
-      // "already adopted" flag.
-      widget.outbox.reset();
-    }
+    final signedOut = _wasSignedIn && !signedIn;
     _wasSignedIn = signedIn;
+    _sessionWork = _sessionWork
+        .then((_) => _applySessionChange(signedOut))
+        .catchError((Object e, StackTrace stack) {
+      // Nothing can await a listener, so without this a failed write here is
+      // an unhandled async error rather than a line in the log.
+      debugPrint('handling a session change failed: $e\n$stack');
+    });
+  }
+
+  Future<void> _applySessionChange(bool signedOut) async {
+    if (signedOut) {
+      _view.reset();
+      // Awaited before anything reconfigures sync: the next account must not
+      // inherit this one's queue or cursor, and must not have its own queue
+      // wiped by a reset that was still in flight. The entries stay on the
+      // phone — see SyncOutbox.reset — and the outbox refuses to offer them
+      // to whoever signs in next.
+      await widget.outbox.reset();
+    }
+    // The state can be gone across that await.
+    if (!mounted) return;
     // The provider hands out this instance, so a swap needs a rebuild.
     if (_configureSync()) setState(() {});
   }
@@ -130,36 +156,80 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
     if (_syncingAs == wanted && _initialised) return false;
 
     _syncingAs = wanted;
-    // Safe even mid-pass: SyncService guards its own notifications after
-    // disposal, so an in-flight sync's `finally` can no longer throw.
+    // Safe even mid-pass: dispose bumps the service's generation, so an
+    // in-flight pass stops writing after its next await instead of landing the
+    // previous account's records in this one's archive.
     if (_initialised) _sync.dispose();
     _initialised = true;
     _sync = SyncService(
-      api: wanted == null ? null : HttpSyncApi(baseUrl: kSyncBaseUrl, token: wanted),
+      api: wanted == null
+          ? null
+          : HttpSyncApi(baseUrl: kSyncBaseUrl, token: wanted),
       outbox: widget.outbox,
       store: widget.store,
       // Record the lapse on the session so the timeline can offer one
       // sign-in instead of the app retrying a dead token forever.
       onAuthExpired: widget.session.markSyncTokenExpired,
     );
-    if (wanted != null) _syncAfterSignIn();
+    // Read here rather than inside the pass: by the time that runs the person
+    // may already have signed out again.
+    final userId = widget.session.userId;
+    if (wanted != null && userId != null) unawaited(_syncAfterSignIn(userId));
     return true;
   }
 
-  bool _initialised = false;
+  /// Deletes the account this phone is signed into.
+  ///
+  /// Here rather than in the shell because everything it needs — which server,
+  /// which token, which outbox — is the composition root's to know, and the
+  /// shell should be able to offer the item without holding any of it.
+  /// [Session.deleteAccount] owns what happens in what order; this only
+  /// supplies the parts.
+  ///
+  /// A fresh api rather than the sync service's: [_configureSync] builds one
+  /// only while `syncEnabled`, and a lapsed token must still be able to delete
+  /// the account it belongs to. Deletion is the one call a 30-day-old token is
+  /// still good for.
+  Future<void> _deleteAccount() async {
+    final token = widget.session.syncToken;
+    // Unreachable from the UI — the item is only offered with a token — but
+    // returning quietly here would look exactly like a successful deletion.
+    if (token == null) throw StateError('no account to delete');
+    await widget.session.deleteAccount(
+      HttpSyncApi(baseUrl: kSyncBaseUrl, token: token),
+      outbox: widget.outbox,
+    );
+  }
 
-  Future<void> _syncAfterSignIn() async {
-    // Anything recorded as a guest predates the account and has never been
-    // offered to the server. Adopt it once, then sync normally.
-    await widget.outbox.adoptExisting(widget.store.entries);
-    await _sync.syncNow();
+  Future<void> _syncAfterSignIn(String userId) async {
+    try {
+      // Anything recorded as a guest predates the account and has never been
+      // offered to the server. The outbox decides whether this is that case:
+      // a *second* account on this phone adopts nothing, or it would upload
+      // the first account's archive into the second one's.
+      // Captured before the await: adoptExisting is a Hive write per entry,
+      // and a second session change can land during it. Reading `_sync`
+      // afterwards would push the ops adopted for this account with whatever
+      // token is current by then. The captured service guards its own
+      // disposal, so a stale one simply does nothing.
+      final sync = _sync;
+      await widget.outbox.adoptExisting(widget.store.entries, userId: userId);
+      await sync.syncNow();
+    } catch (e, stack) {
+      // Nobody awaits this pass, so a failed Hive write used to escape as an
+      // unhandled async error. Backing up is best-effort by construction: the
+      // queue is untouched, and the next resume tries the whole thing again.
+      debugPrint('sync after sign-in failed: $e\n$stack');
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Coming back is the natural moment: anything recorded offline goes up,
-    // and anything recorded on another phone comes down.
-    if (state == AppLifecycleState.resumed) _sync.syncNow();
+    // and anything recorded on another phone comes down. Not awaited: this
+    // override cannot be async, and syncNow() never throws — every failure
+    // is caught inside and reported through SyncService's own listeners.
+    if (state == AppLifecycleState.resumed) unawaited(_sync.syncNow());
   }
 
   @override
@@ -182,6 +252,9 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
         ChangeNotifierProvider<ArchiveView>.value(value: _view),
         // So the timeline can say whether the archive is actually backed up.
         ChangeNotifierProvider<SyncService>.value(value: _sync),
+        // The one destructive account action, handed down as a callback so the
+        // shell can offer it without owning a server url or the outbox.
+        Provider<AccountDeleter>.value(value: _deleteAccount),
       ],
       child: MaterialApp(
         title: 'I prefer',

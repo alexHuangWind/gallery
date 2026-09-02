@@ -189,7 +189,8 @@ class AppTheme {
           color: c.ink,
         ),
         bodyLarge: TextStyle(fontSize: 16, color: c.ink, height: 1.4),
-        bodyMedium: TextStyle(fontSize: 14, color: c.ink.withValues(alpha: 0.8)),
+        bodyMedium:
+            TextStyle(fontSize: 14, color: c.ink.withValues(alpha: 0.8)),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: c.paper,
@@ -213,6 +214,18 @@ class AppTheme {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
+      ),
+      // The FAB is the filled button in its other posture — same gesture, so
+      // the same fill and the same corner, described here rather than at the
+      // one call site that raises one. Unthemed it takes
+      // colorScheme.primaryContainer, which is the seed's warm brown: the FAB
+      // sits over the timeline, so that lands next to every photo in the app.
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: c.ink,
+        foregroundColor: c.paper,
+        // 8dp like every real button; the default stadium pill reads as a
+        // chip, and pills mean "selectable filter" everywhere else here.
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       // Everything below exists for one reason: ColorScheme.fromSeed derives
       // warm browns from the seed, and any surface left unthemed quietly picks

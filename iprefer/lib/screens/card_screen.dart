@@ -168,7 +168,8 @@ class _CardScreenState extends State<CardScreen> {
             Expanded(
               child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: PreferenceCard(
                     boundaryKey: _boundaryKey,
                     image: FileImage(_imageFile),

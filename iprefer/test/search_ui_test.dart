@@ -1,13 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
 import 'package:iprefer/data/archive_view.dart';
 import 'package:iprefer/data/entry_store.dart';
 import 'package:iprefer/data/session.dart';
-import 'package:iprefer/data/sync/auth_client.dart';
-import 'package:iprefer/data/sync/sync_outbox.dart';
 import 'package:iprefer/data/sync/sync_service.dart';
 import 'package:iprefer/models/entry.dart';
 import 'package:iprefer/screens/home_shell.dart';
@@ -16,23 +11,17 @@ import 'package:iprefer/widgets/backup_bar.dart';
 import 'package:iprefer/widgets/sort_bar.dart';
 import 'package:iprefer/widgets/on_this_day.dart';
 import 'package:iprefer/widgets/tag_filter_bar.dart';
-import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+
+import 'support/harness.dart';
 
 /// The search flow end to end, through the real shell: open the field, narrow
 /// the archive, hit a query that matches nothing, and get back out.
 ///
 /// Note the `tester.runAsync` in [seed]: testWidgets runs in a fake-async
 /// zone and the store does real file I/O, which fake time never completes.
-class _StubAuth implements AuthClient {
-  @override
-  Future<AppleSession> exchangeAppleToken(String identityToken) async =>
-      const AppleSession(token: 't', userId: 'u');
-}
-
 void main() {
-  late Directory tempDir;
-  late Box<Entry> box;
+  late TestEnv env;
   late EntryStore store;
   late ArchiveView view;
   late Session session;
@@ -40,27 +29,12 @@ void main() {
   var seq = 0;
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_search_ui_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) Hive.registerAdapter(EntryAdapter());
-    box = await Hive.openBox<Entry>('entries_${seq++}');
-    final photosRoot = p.join(tempDir.path, 'photos');
-    Directory(photosRoot).createSync(recursive: true);
-    final n = seq;
-    final outbox = SyncOutbox.forTest(
-      await Hive.openBox('ops_$n'),
-      await Hive.openBox('meta_$n'),
-      await Hive.openBox('photos_$n'),
-    );
-    store = EntryStore.forTest(box, photosRoot: photosRoot, outbox: outbox);
-    session = Session.forTest(
-      await Hive.openBox('session_$n'),
-      appleToken: () async => 'apple-token',
-      auth: _StubAuth(),
-    );
+    env = await TestEnv.create('iprefer_search_ui_test');
+    store = await env.store();
+    session = await env.session();
     // api: null — a guest. The backup line then takes no height, which keeps
     // these assertions about search and nothing else.
-    sync = SyncService(api: null, outbox: outbox, store: store);
+    sync = SyncService(api: null, outbox: await env.outbox(), store: store);
     // No getFix: "nearest" is not what these exercise, and the default would
     // reach for the platform.
     view = ArchiveView(getFix: ({bool prompt = false}) async => null);
@@ -69,8 +43,7 @@ void main() {
   tearDown(() async {
     view.dispose();
     sync.dispose();
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    await env.dispose();
   });
 
   /// localPath points nowhere on purpose — the card falls back to its
@@ -284,6 +257,46 @@ void main() {
     expect(find.byType(TextField), findsNothing);
     expect(title('I prefer'), findsOneWidget);
     expect(find.text('the smell of rain on hot concrete'), findsOneWidget);
+
+    await drain(tester);
+  });
+
+  testWidgets('the system back button closes search, not the app',
+      (tester) async {
+    // The shell is the root route: with the field open and nothing above it to
+    // pop, Android's back gesture used to leave the app — losing the timeline
+    // to close a search box.
+    await seedThree(tester);
+    await pump(tester);
+    await openSearch(tester);
+    await type(tester, 'ferns');
+
+    // By predicate rather than byType: PopScope is generic and the shell lets
+    // its type argument be inferred, so naming a Type here would be asserting
+    // about inference rather than about back.
+    bool canPop() => tester
+        .widgetList(find.descendant(
+          of: find.byType(HomeShell),
+          matching: find.byWidgetPredicate((w) => w is PopScope),
+        ))
+        .whereType<PopScope>()
+        .single
+        .canPop;
+
+    // The claim the gesture rests on: while searching, back is ours to answer.
+    expect(canPop(), isFalse);
+
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+
+    // Exactly what the back arrow does — and the shell is still standing.
+    expect(view.query, '');
+    expect(find.byType(TextField), findsNothing);
+    expect(title('I prefer'), findsOneWidget);
+    expect(find.text('the smell of rain on hot concrete'), findsOneWidget);
+    // With search closed the route is poppable again, so back means "leave"
+    // and the system handles it — this shell must not swallow it.
+    expect(canPop(), isTrue);
 
     await drain(tester);
   });

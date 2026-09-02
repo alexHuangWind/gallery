@@ -43,6 +43,29 @@ export function photoNameFor(entryId: string, name: unknown): string {
   return name;
 }
 
+/// What we will serve a photo as, decided by its (already validated)
+/// extension.
+///
+/// The upload's own Content-Type header is never used. It is attacker-supplied
+/// and it is stored, so honouring it turns this bucket into a stored-XSS
+/// delivery service: upload `text/html` under a `.jpg` name and the GET hands
+/// a browser a script from our origin. The extension allowlist is the only
+/// thing here we trust, so it is the only thing that decides.
+export function photoContentType(name: string): string {
+  switch (name.slice(name.lastIndexOf('.') + 1).toLowerCase()) {
+    case 'png':
+      return 'image/png';
+    case 'heic':
+    case 'heif':
+      return 'image/heic';
+    case 'webp':
+      return 'image/webp';
+    default:
+      // jpg | jpeg — PHOTO_EXTENSIONS admits nothing else.
+      return 'image/jpeg';
+  }
+}
+
 function optionalCoordinate(value: unknown, label: string): number | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${label} must be a finite number`);

@@ -1,40 +1,21 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:iprefer/data/session.dart';
 import 'package:iprefer/data/sync/auth_client.dart';
 
-class FakeAuthClient implements AuthClient {
-  FakeAuthClient({this.session, this.error});
-
-  final AppleSession? session;
-  final Object? error;
-  final List<String> exchanged = [];
-
-  @override
-  Future<AppleSession> exchangeAppleToken(String identityToken) async {
-    exchanged.add(identityToken);
-    if (error != null) throw error!;
-    return session!;
-  }
-}
+import 'support/fakes.dart';
+import 'support/harness.dart';
 
 void main() {
-  late Directory tempDir;
+  late TestEnv env;
   late Box box;
-  var seq = 0;
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_session_test');
-    Hive.init(tempDir.path);
-    box = await Hive.openBox('session_${seq++}');
+    env = await TestEnv.create('iprefer_session_test');
+    box = await env.openBox('session');
   });
 
-  tearDown(() async {
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-  });
+  tearDown(() => env.dispose());
 
   Session sessionWith({
     String? appleToken = 'apple-identity-token',
@@ -106,7 +87,8 @@ void main() {
         error: AuthException("apple couldn't confirm that sign-in"),
       );
 
-      await expectLater(session.signInWithApple(), throwsA(isA<AuthException>()));
+      await expectLater(
+          session.signInWithApple(), throwsA(isA<AuthException>()));
       expect(session.signedIn, isFalse);
       expect(session.syncToken, isNull);
     });

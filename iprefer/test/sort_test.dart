@@ -46,18 +46,20 @@ void main() {
 
       // Unlocated entries all tie at infinity, so the explicit tiebreak has to
       // hold them newest-first rather than leaving it to an unstable sort.
-      expect(sorted.map((e) => e.id),
-          ['somewhere', 'nowhere-new', 'nowhere-old']);
+      expect(
+          sorted.map((e) => e.id), ['somewhere', 'nowhere-new', 'nowhere-old']);
     });
 
-    test('an antipodal entry still sorts behind a near one, not ahead of the '
+    test(
+        'an antipodal entry still sorts behind a near one, not ahead of the '
         'entries with no location at all', () {
       // Haversine can produce NaN here without a clamp, and NaN outranks
       // infinity in Dart's compareTo — which would put the far side of the
       // globe behind entries that have no place at all.
       final sorted = sortedByDistanceFrom([
         _at('placeless', daysAgo: 1),
-        _at('antipode', lat: -69.51232454868148, lng: -93.4187717400493, daysAgo: 2),
+        _at('antipode',
+            lat: -69.51232454868148, lng: -93.4187717400493, daysAgo: 2),
         _at('here', lat: oLat, lng: oLng, daysAgo: 3),
       ], 69.51232454868148, 86.5812282599507);
 

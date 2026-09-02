@@ -86,9 +86,35 @@ export async function verifyToken(env: Env, token: string | null): Promise<strin
   }
 }
 
-/// Pulls the bearer token off a request and verifies it.
-export async function authenticate(request: Request, env: Env): Promise<string | null> {
+/// Pulls the bearer token off a request and checks its signature and expiry —
+/// and nothing else. Says nothing about whether the account still exists, so
+/// only `DELETE /v1/account` uses it directly (see index.ts for why).
+export async function authenticateToken(request: Request, env: Env): Promise<string | null> {
   const header = request.headers.get('Authorization');
   if (!header?.startsWith('Bearer ')) return null;
   return verifyToken(env, header.slice('Bearer '.length).trim());
+}
+
+/// What every guarded route uses: a valid token AND an account that still
+/// exists.
+///
+/// The second half is what makes account deletion take effect at once. These
+/// tokens are stateless HMACs with a thirty day life, so with the signature
+/// check alone a deleted user's phone could go on pushing ops for a month
+/// after the account was erased. A primary-key lookup per request is a real
+/// cost, but this service serves one phone per account and the alternative is
+/// a delete that does not actually stop anything.
+///
+/// A D1 failure here throws rather than returning null, on purpose: the client
+/// reads 401 as "the session is over, stop syncing until someone signs in
+/// again" (`SyncAuthExpiredException`), so a database blip must surface as a
+/// retryable 5xx instead of quietly ending the session.
+export async function authenticate(request: Request, env: Env): Promise<string | null> {
+  const userId = await authenticateToken(request, env);
+  if (!userId) return null;
+
+  const row = await env.DB.prepare('SELECT 1 AS ok FROM users WHERE id = ?')
+    .bind(userId)
+    .first<{ ok: number }>();
+  return row ? userId : null;
 }

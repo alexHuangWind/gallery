@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
 import 'sync_op.dart';
@@ -15,11 +16,27 @@ class PullPage {
 }
 
 /// Raised for anything the caller can't fix by retrying differently. The sync
-/// service treats every failure the same way — try again later — so this
-/// carries a message for logs, not a taxonomy.
+/// service treats almost every failure the same way — try again later — so
+/// this carries a message for logs, not a taxonomy.
 class SyncApiException implements Exception {
-  SyncApiException(this.message);
+  SyncApiException(this.message, {this.statusCode});
   final String message;
+
+  /// The HTTP status, when the failure came from a response rather than from
+  /// the socket. Null for offline, DNS, timeout.
+  final int? statusCode;
+
+  /// The server rejected the request itself, not the attempt at it.
+  ///
+  /// The distinction only matters for photos: an upload the server will never
+  /// accept (too big, wrong name) is retried first on every pass, so without
+  /// this it sits at the head of the queue rejecting itself forever and every
+  /// photo behind it stays unbacked-up.
+  bool get isPermanent {
+    final code = statusCode;
+    return code != null && code >= 400 && code < 500;
+  }
+
   @override
   String toString() => 'SyncApiException: $message';
 }
@@ -32,7 +49,8 @@ class SyncApiException implements Exception {
 /// would keep "trying again" forever while quietly not backing anything up —
 /// the archive silently stops being safe and nothing ever says so.
 class SyncAuthExpiredException extends SyncApiException {
-  SyncAuthExpiredException() : super('the sync session has expired');
+  SyncAuthExpiredException()
+      : super('the sync session has expired', statusCode: 401);
 }
 
 /// The server as the app sees it.
@@ -48,6 +66,13 @@ abstract class SyncApi {
 
   /// Null when the server has no photo under that name.
   Future<Uint8List?> downloadPhoto(String name);
+
+  /// Erases the account behind this token: its ops, its photos, its row.
+  ///
+  /// Returns normally when the account is gone, throws when it may not be —
+  /// which is the only distinction the caller can act on, since the local
+  /// half of a deletion must not happen while the server half might not have.
+  Future<void> deleteAccount();
 }
 
 /// Talks to `server/` over HTTP.
@@ -74,7 +99,8 @@ class HttpSyncApi implements SyncApi {
 
   Never _fail(http.BaseResponse res, String what) {
     if (res.statusCode == 401) throw SyncAuthExpiredException();
-    throw SyncApiException('$what failed: HTTP ${res.statusCode}');
+    throw SyncApiException('$what failed: HTTP ${res.statusCode}',
+        statusCode: res.statusCode);
   }
 
   @override
@@ -83,7 +109,9 @@ class HttpSyncApi implements SyncApi {
         .post(
           _uri('/v1/sync/push'),
           headers: _headers,
-          body: jsonEncode({'ops': [for (final o in ops) o.toJson()]}),
+          body: jsonEncode({
+            'ops': [for (final o in ops) o.toJson()]
+          }),
         )
         .timeout(timeout);
     if (res.statusCode != 200) _fail(res, 'push');
@@ -102,10 +130,20 @@ class HttpSyncApi implements SyncApi {
     if (res.statusCode != 200) _fail(res, 'pull');
     final body = jsonDecode(res.body) as Map<String, Object?>;
     final raw = (body['ops'] as List?) ?? const [];
+    // One op that cannot be parsed must not fail the page. This runs inside
+    // pull(), *before* the service's per-op guard in _apply, so a throw here
+    // would escape as a failed pass — and the cursor would stall on this page
+    // forever, which is the exact failure MalformedSyncOp exists to avoid.
+    final ops = <RemoteOp>[];
+    for (final o in raw) {
+      try {
+        ops.add(RemoteOp.fromJson((o as Map).cast<String, Object?>()));
+      } catch (e) {
+        debugPrint('pull: skipping an unreadable op ($e)');
+      }
+    }
     return PullPage(
-      ops: [
-        for (final o in raw) RemoteOp.fromJson((o as Map).cast<String, Object?>()),
-      ],
+      ops: ops,
       seq: (body['seq'] as num?)?.toInt() ?? since,
       hasMore: body['hasMore'] == true,
     );
@@ -123,17 +161,31 @@ class HttpSyncApi implements SyncApi {
           body: bytes,
         )
         .timeout(timeout);
-    if (res.statusCode != 204 && res.statusCode != 200) _fail(res, 'photo upload');
+    if (res.statusCode != 204 && res.statusCode != 200)
+      _fail(res, 'photo upload');
   }
 
   @override
   Future<Uint8List?> downloadPhoto(String name) async {
-    final res = await _client
-        .get(_uri('/v1/photos/$name'), headers: {'authorization': 'Bearer $token'})
-        .timeout(timeout);
+    final res = await _client.get(_uri('/v1/photos/$name'),
+        headers: {'authorization': 'Bearer $token'}).timeout(timeout);
     if (res.statusCode == 404) return null;
     if (res.statusCode != 200) _fail(res, 'photo download');
     return res.bodyBytes;
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    final res = await _client.delete(_uri('/v1/account'),
+        headers: {'authorization': 'Bearer $token'}).timeout(timeout);
+    // 204 is the deletion; 401 is *also* success, which is why this cannot go
+    // through [_fail] — that turns a 401 into [SyncAuthExpiredException], the
+    // "sign in again to resume backing up" path, which is exactly wrong here.
+    // The endpoint checks only the token's signature (see server/README.md),
+    // so a 401 means the token has lapsed or the users row is already gone —
+    // either way there is no account left on this phone's behalf to keep.
+    if (res.statusCode == 204 || res.statusCode == 401) return;
+    _fail(res, 'account deletion');
   }
 
   static String _contentTypeFor(String name) {
