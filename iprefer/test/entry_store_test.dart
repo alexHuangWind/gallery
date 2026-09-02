@@ -8,6 +8,8 @@ import 'package:iprefer/data/entry_store.dart';
 import 'package:iprefer/models/entry.dart';
 import 'package:path/path.dart' as p;
 
+import 'support/harness.dart';
+
 /// These tests exercise the store's real contracts through EntryStore.forTest —
 /// a real Hive box in a temp dir, a real photos directory. Per the project
 /// rule, they call production methods; nothing here re-implements store logic.
@@ -16,10 +18,10 @@ void main() {
   // binding; these are plain `test`s, so nothing else would have set one up.
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late Directory tempDir;
-  late Box<Entry> box;
+  late TestEnv env;
   late String photosRoot;
   late EntryStore store;
+  late Box<Entry> box;
 
   final when = DateTime.fromMillisecondsSinceEpoch(1700000000000);
 
@@ -42,24 +44,17 @@ void main() {
       );
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_store_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) {
-      Hive.registerAdapter(EntryAdapter());
-    }
-    box = await Hive.openBox<Entry>('store_test');
-    photosRoot = p.join(tempDir.path, 'photos');
-    store = EntryStore.forTest(box, photosRoot: photosRoot);
+    env = await TestEnv.create('iprefer_store_test');
+    photosRoot = env.photosRoot;
+    store = await env.store(withOutbox: false);
+    box = await env.entriesBox();
   });
 
-  tearDown(() async {
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-  });
+  tearDown(() => env.dispose());
 
   /// A fake "picked photo" on disk for create() to copy.
   File writeSourcePhoto([String name = 'picked.jpg']) {
-    final f = File(p.join(tempDir.path, name));
+    final f = File(p.join(env.tempDir.path, name));
     f.writeAsBytesSync(List.filled(32, 7));
     return f;
   }
@@ -147,7 +142,7 @@ void main() {
     });
 
     test('passes a legacy absolute path through untouched', () {
-      final abs = p.join(tempDir.path, 'legacy', 'old.jpg');
+      final abs = p.join(env.tempDir.path, 'legacy', 'old.jpg');
       final f = store.fileFor(entryAt('e2', localPath: abs));
       expect(f.path, abs);
     });
@@ -259,7 +254,7 @@ void main() {
       // so photosRoot/<syncPhotoName> does not exist for them. Returning null
       // here makes the sync service mark the upload done and drop the photo
       // for good — silently, for every entry recorded before that change.
-      final legacyDir = Directory(p.join(tempDir.path, 'legacy'))
+      final legacyDir = Directory(p.join(env.tempDir.path, 'legacy'))
         ..createSync(recursive: true);
       final legacyPhoto = File(p.join(legacyDir.path, 'IMG_0042.JPG'))
         ..writeAsBytesSync([4, 2]);

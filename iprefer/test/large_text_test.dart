@@ -1,8 +1,5 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
 import 'package:iprefer/data/archive_view.dart';
 import 'package:iprefer/data/entry_store.dart';
 import 'package:iprefer/models/entry.dart';
@@ -11,8 +8,9 @@ import 'package:iprefer/widgets/entry_chip.dart';
 import 'package:iprefer/widgets/on_this_day.dart';
 import 'package:iprefer/widgets/sort_bar.dart';
 import 'package:iprefer/widgets/tag_filter_bar.dart';
-import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+
+import 'support/harness.dart';
 
 /// Everything here is the same layout at twice the system type size, on a
 /// 360 dp phone — the combination that turned the timeline's header and both
@@ -23,27 +21,17 @@ import 'package:provider/provider.dart';
 /// [EntryStrip], the same widget [OnThisDay] builds and the one exercised
 /// directly below, so covering that covers both banners.
 void main() {
-  late Directory tempDir;
-  late Box<Entry> box;
+  late TestEnv env;
   late EntryStore store;
-  var seq = 0;
 
   final today = DateTime(2026, 8, 25, 14);
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_large_text_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) Hive.registerAdapter(EntryAdapter());
-    box = await Hive.openBox<Entry>('entries_${seq++}');
-    final photosRoot = p.join(tempDir.path, 'photos');
-    Directory(photosRoot).createSync(recursive: true);
-    store = EntryStore.forTest(box, photosRoot: photosRoot);
+    env = await TestEnv.create('iprefer_large_text_test');
+    store = await env.store(withOutbox: false);
   });
 
-  tearDown(() async {
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-  });
+  tearDown(() => env.dispose());
 
   /// A long line on purpose: the chip caps at four lines, and four scaled
   /// lines are what outgrew the old fixed-height strip.

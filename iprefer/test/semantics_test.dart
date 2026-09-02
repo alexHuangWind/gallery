@@ -1,13 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
 import 'package:iprefer/data/archive_view.dart';
 import 'package:iprefer/data/entry_store.dart';
 import 'package:iprefer/data/session.dart';
-import 'package:iprefer/data/sync/auth_client.dart';
-import 'package:iprefer/data/sync/sync_outbox.dart';
 import 'package:iprefer/data/sync/sync_service.dart';
 import 'package:iprefer/models/entry.dart';
 import 'package:iprefer/screens/archive_screen.dart';
@@ -15,8 +10,9 @@ import 'package:iprefer/screens/map_screen.dart';
 import 'package:iprefer/theme.dart';
 import 'package:iprefer/widgets/entry_chip.dart';
 import 'package:iprefer/widgets/preference_card.dart';
-import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+
+import 'support/harness.dart';
 
 /// What a screen reader is told about the three things in this app you can
 /// tap: a recall chip, a map pin, a timeline tile.
@@ -24,20 +20,12 @@ import 'package:provider/provider.dart';
 /// All three were gesture-only and unlabelled. The pin is the worst of them —
 /// it announced as an unlabelled image, and the pins *are* the map — and the
 /// tile's only way to delete is a long press, which nothing said out loud.
-class _StubAuth implements AuthClient {
-  @override
-  Future<AppleSession> exchangeAppleToken(String identityToken) async =>
-      const AppleSession(token: 't', userId: 'u');
-}
-
 void main() {
-  late Directory tempDir;
-  late Box<Entry> box;
+  late TestEnv env;
   late EntryStore store;
   late ArchiveView view;
   late Session session;
   late SyncService sync;
-  var seq = 0;
 
   const line = 'a flat white before the world wakes up';
 
@@ -52,27 +40,12 @@ void main() {
   // Every box is opened here rather than in a test body: testWidgets runs in a
   // fake-async zone, and Hive's real file I/O never completes inside one.
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_semantics_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) Hive.registerAdapter(EntryAdapter());
-    final n = seq++;
-    box = await Hive.openBox<Entry>('entries_$n');
-    final photosRoot = p.join(tempDir.path, 'photos');
-    Directory(photosRoot).createSync(recursive: true);
-    final outbox = SyncOutbox.forTest(
-      await Hive.openBox('ops_$n'),
-      await Hive.openBox('meta_$n'),
-      await Hive.openBox('photos_$n'),
-    );
-    store = EntryStore.forTest(box, photosRoot: photosRoot, outbox: outbox);
-    session = Session.forTest(
-      await Hive.openBox('session_$n'),
-      appleToken: () async => 'apple-token',
-      auth: _StubAuth(),
-    );
+    env = await TestEnv.create('iprefer_semantics_test');
+    store = await env.store();
+    session = await env.session();
     // api: null — a guest, so the backup line takes no height and stays out
     // of this.
-    sync = SyncService(api: null, outbox: outbox, store: store);
+    sync = SyncService(api: null, outbox: await env.outbox(), store: store);
     // No getFix: nothing here sorts by distance, and the default would reach
     // for the platform.
     view = ArchiveView(getFix: ({bool prompt = false}) async => null);
@@ -81,8 +54,7 @@ void main() {
   tearDown(() async {
     view.dispose();
     sync.dispose();
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    await env.dispose();
   });
 
   Future<void> pumpAlone(WidgetTester tester, Widget child) {

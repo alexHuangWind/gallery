@@ -3,14 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
 import 'package:iprefer/data/entry_store.dart';
 import 'package:iprefer/data/location_service.dart';
-import 'package:iprefer/models/entry.dart';
 import 'package:iprefer/screens/compose_screen.dart';
 import 'package:iprefer/theme.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+
+import 'support/harness.dart';
 
 /// The first screen of the product, and until now the only one with no tests.
 ///
@@ -19,8 +19,7 @@ import 'package:provider/provider.dart';
 /// that follows a pick is otherwise unreachable under `flutter test`. Nothing
 /// here taps the well, which is what keeps LocationService.current out of it.
 void main() {
-  late Directory tempDir;
-  late Box<Entry> box;
+  late TestEnv env;
   late EntryStore store;
   var seq = 0;
 
@@ -37,24 +36,16 @@ void main() {
   });
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_compose_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) Hive.registerAdapter(EntryAdapter());
-    box = await Hive.openBox<Entry>('entries_${seq++}');
-    final photosRoot = p.join(tempDir.path, 'photos');
-    Directory(photosRoot).createSync(recursive: true);
-    store = EntryStore.forTest(box, photosRoot: photosRoot);
+    env = await TestEnv.create('iprefer_compose_test');
+    store = await env.store(withOutbox: false);
   });
 
-  tearDown(() async {
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-  });
+  tearDown(() => env.dispose());
 
   /// A path that exists but holds nothing decodable, so the well takes its
   /// error path — which is the point: without an errorBuilder that throws.
   File fakePhoto() {
-    return File(p.join(tempDir.path, 'pick_${seq++}.jpg'))
+    return File(p.join(env.tempDir.path, 'pick_${seq++}.jpg'))
       ..writeAsBytesSync(const <int>[0, 1, 2, 3]);
   }
 
