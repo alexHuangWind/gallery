@@ -8,16 +8,48 @@ import '../theme.dart';
 import '../widgets/tag_input.dart';
 import 'card_screen.dart';
 
+/// Where the background location lookup has got to. Public only so a test can
+/// name the states — every one of them is otherwise reachable exclusively
+/// through a real photo pick.
+enum FixState { idle, locating, found, unavailable, dropped }
+
+/// Lets a test hold on to the photo well across a keystroke and check it was
+/// not rebuilt — the well is the expensive part of this screen and the whole
+/// point of not rebuilding it.
+@visibleForTesting
+const Key photoWellKey = Key('compose-photo-well');
+
 /// Step one of the recording habit: a photo, a line, and — quietly, in the
 /// background — where you are.
 class ComposeScreen extends StatefulWidget {
-  const ComposeScreen({super.key});
+  const ComposeScreen({super.key})
+      : initialPhoto = null,
+        initialFixState = FixState.idle,
+        initialFix = null;
+
+  /// Starts the screen in a state that only a photo pick can otherwise
+  /// produce. A pick goes out to the platform picker and then to the location
+  /// stack, neither of which exists under `flutter test`, so without this seam
+  /// the photo well, the place row and an enabled "make card" are all
+  /// unreachable in a widget test.
+  @visibleForTesting
+  const ComposeScreen.seeded({
+    super.key,
+    this.initialPhoto,
+    this.initialFixState = FixState.idle,
+    this.initialFix,
+  });
+
+  @visibleForTesting
+  final File? initialPhoto;
+  @visibleForTesting
+  final FixState initialFixState;
+  @visibleForTesting
+  final PlaceFix? initialFix;
 
   @override
   State<ComposeScreen> createState() => _ComposeScreenState();
 }
-
-enum _FixState { idle, locating, found, unavailable, dropped }
 
 class _ComposeScreenState extends State<ComposeScreen> {
   final _picker = ImagePicker();
@@ -25,7 +57,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
   File? _photo;
 
   PlaceFix? _fix;
-  _FixState _fixState = _FixState.idle;
+  FixState _fixState = FixState.idle;
   List<String> _tags = const [];
 
   /// The in-flight location lookup, so "make card" can give it a moment to
@@ -36,6 +68,14 @@ class _ComposeScreenState extends State<ComposeScreen> {
   /// two card screens — and because the fix can land between the taps, the
   /// two cards can even disagree about the place.
   bool _makingCard = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _photo = widget.initialPhoto;
+    _fix = widget.initialFix;
+    _fixState = widget.initialFixState;
+  }
 
   @override
   void dispose() {
@@ -69,20 +109,20 @@ class _ComposeScreenState extends State<ComposeScreen> {
   }
 
   Future<void> _locate() async {
-    if (_fixState == _FixState.locating) return;
-    setState(() => _fixState = _FixState.locating);
+    if (_fixState == FixState.locating) return;
+    setState(() => _fixState = FixState.locating);
     final fix = await LocationService.current(prompt: true);
     if (!mounted) return;
     setState(() {
       _fix = fix;
-      _fixState = fix == null ? _FixState.unavailable : _FixState.found;
+      _fixState = fix == null ? FixState.unavailable : FixState.found;
     });
   }
 
   void _dropFix() {
     setState(() {
       _fix = null;
-      _fixState = _FixState.dropped;
+      _fixState = FixState.dropped;
     });
   }
 
@@ -96,7 +136,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
       // this the entry is written placeless — no pin, no recall, invisible to
       // "nearest" — while the fix lands seconds later on a screen already
       // left. Bounded, because location must never block recording.
-      if (_fixState == _FixState.locating && _locating != null) {
+      if (_fixState == FixState.locating && _locating != null) {
         await _locating!.timeout(const Duration(seconds: 2), onTimeout: () {});
       }
       if (!mounted) return;
@@ -115,8 +155,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canMake = _photo != null && _controller.text.trim().isNotEmpty;
-
     return Scaffold(
       appBar: AppBar(title: const Text('new')),
       body: SafeArea(
@@ -125,7 +163,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _PhotoWell(photo: _photo, onPick: _pick),
+              _PhotoWell(key: photoWellKey, photo: _photo, onPick: _pick),
               if (_photo != null) ...[
                 const SizedBox(height: 12),
                 _PlaceRow(
@@ -154,7 +192,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
               const SizedBox(height: 8),
               TextField(
                 controller: _controller,
-                onChanged: (_) => setState(() {}),
                 maxLines: 3,
                 minLines: 1,
                 textCapitalization: TextCapitalization.none,
@@ -170,27 +207,39 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 onChanged: (t) => setState(() => _tags = t),
               ),
               const SizedBox(height: 28),
-              FilledButton(
-                // Not disabled while making: a disabled M3 button loses the
-                // ink fill and the paper spinner vanishes into it. _makeCard
-                // guards its own re-entry.
-                onPressed: canMake ? _makeCard : null,
-                child: _makingCard
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 1.6, color: context.colors.paper),
-                          ),
-                          const SizedBox(width: 8),
-                          const Text('making your card'),
-                        ],
-                      )
-                    : const Text('make card'),
+              // Only the button cares about the words, so only the button
+              // listens. Reading _controller.text in build meant every
+              // keystroke rebuilt the screen: the photo well re-inflating a
+              // full-size decoded image, and TagInput re-reading the whole
+              // archive's tag vocabulary out of the store.
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _controller,
+                builder: (context, value, _) {
+                  final canMake = _photo != null && value.text.trim().isNotEmpty;
+                  return FilledButton(
+                    // Not disabled while making: a disabled M3 button loses the
+                    // ink fill and the paper spinner vanishes into it. _makeCard
+                    // guards its own re-entry.
+                    onPressed: canMake ? _makeCard : null,
+                    child: _makingCard
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 1.6,
+                                    color: context.colors.paper),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text('making your card'),
+                            ],
+                          )
+                        : const Text('make card'),
+                  );
+                },
               ),
             ],
           ),
@@ -210,104 +259,107 @@ class _PlaceRow extends StatelessWidget {
     required this.onDrop,
   });
 
-  final _FixState state;
+  final FixState state;
   final PlaceFix? fix;
   final VoidCallback onRetry;
   final VoidCallback onDrop;
 
+  /// Visually small, but the hit area stays a real target: these buttons are
+  /// the recovery path right after a location denial, the worst moment to
+  /// demand precision. shrinkWrap would collapse the tappable box to the label.
+  static final ButtonStyle _actionStyle = TextButton.styleFrom(
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    minimumSize: const Size(48, 40),
+  );
+
+  /// Every branch is a leading glyph, a label and (usually) one action, so
+  /// they share a shape. Laying them out one at a time is how the "no place on
+  /// this one" row ended up with a bare Text and a Spacer, which overflows the
+  /// moment the label is bigger than the room left beside the button.
+  Widget _row(BuildContext context,
+      {required Widget leading, required String label, Widget? action}) {
+    return Row(
+      children: [
+        leading,
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(color: context.colors.muted, fontSize: 13),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (action != null) action,
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final muted = TextStyle(color: context.colors.muted, fontSize: 13);
+    final pin =
+        Icon(Icons.place_outlined, size: 16, color: context.colors.muted);
 
     switch (state) {
-      case _FixState.locating:
-        return Row(
-          children: [
-            const SizedBox(
+      case FixState.locating:
+        return _row(
+          context,
+          leading: const Padding(
+            // The pin the other branches use is 16 wide; matching it keeps the
+            // label from stepping sideways when the fix lands.
+            padding: EdgeInsets.symmetric(horizontal: 1.5),
+            child: SizedBox(
               width: 13,
               height: 13,
               child: CircularProgressIndicator(strokeWidth: 1.6),
             ),
-            const SizedBox(width: 10),
-            Text('finding where you are', style: muted),
-          ],
+          ),
+          label: 'finding where you are',
         );
 
-      case _FixState.found:
-        final label = fix?.label ?? 'this spot';
-        return Row(
-          children: [
-            Icon(Icons.place_outlined, size: 16, color: context.colors.muted),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(label, style: muted, overflow: TextOverflow.ellipsis),
-            ),
-            TextButton(
-              onPressed: onDrop,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                // Visually small, but the hit area stays a real target: these
-                // buttons are the recovery path right after a location denial,
-                // the worst moment to demand precision. shrinkWrap would
-                // collapse the tappable box to the label.
-                minimumSize: const Size(48, 40),
-              ),
-              child: const Text('leave it off', style: TextStyle(fontSize: 12)),
-            ),
-          ],
+      case FixState.found:
+        return _row(
+          context,
+          leading: pin,
+          label: fix?.label ?? 'this spot',
+          action: TextButton(
+            onPressed: onDrop,
+            style: _actionStyle,
+            child: const Text('leave it off', style: TextStyle(fontSize: 12)),
+          ),
         );
 
-      case _FixState.dropped:
-        return Row(
-          children: [
-            Icon(Icons.place_outlined, size: 16, color: context.colors.muted),
-            const SizedBox(width: 6),
-            Text('no place on this one', style: muted),
-            const Spacer(),
-            TextButton(
-              onPressed: onRetry,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                // Visually small, but the hit area stays a real target: these
-                // buttons are the recovery path right after a location denial,
-                // the worst moment to demand precision. shrinkWrap would
-                // collapse the tappable box to the label.
-                minimumSize: const Size(48, 40),
-              ),
-              child: const Text('add it back', style: TextStyle(fontSize: 12)),
-            ),
-          ],
+      case FixState.dropped:
+        return _row(
+          context,
+          leading: pin,
+          label: 'no place on this one',
+          action: TextButton(
+            onPressed: onRetry,
+            style: _actionStyle,
+            child: const Text('add it back', style: TextStyle(fontSize: 12)),
+          ),
         );
 
-      case _FixState.unavailable:
-        return Row(
-          children: [
-            Icon(Icons.place_outlined, size: 16, color: context.colors.muted),
-            const SizedBox(width: 6),
-            Expanded(child: Text("couldn't get your location", style: muted)),
-            TextButton(
-              onPressed: onRetry,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                // Visually small, but the hit area stays a real target: these
-                // buttons are the recovery path right after a location denial,
-                // the worst moment to demand precision. shrinkWrap would
-                // collapse the tappable box to the label.
-                minimumSize: const Size(48, 40),
-              ),
-              child: const Text('try again', style: TextStyle(fontSize: 12)),
-            ),
-          ],
+      case FixState.unavailable:
+        return _row(
+          context,
+          leading: pin,
+          label: "couldn't get your location",
+          action: TextButton(
+            onPressed: onRetry,
+            style: _actionStyle,
+            child: const Text('try again', style: TextStyle(fontSize: 12)),
+          ),
         );
 
-      case _FixState.idle:
+      case FixState.idle:
         return const SizedBox.shrink();
     }
   }
 }
 
 class _PhotoWell extends StatelessWidget {
-  const _PhotoWell({required this.photo, required this.onPick});
+  const _PhotoWell({super.key, required this.photo, required this.onPick});
 
   final File? photo;
   final void Function(ImageSource) onPick;
@@ -342,30 +394,67 @@ class _PhotoWell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 9 / 16,
-      child: GestureDetector(
-        onTap: () => _choose(context),
-        child: Container(
-          decoration: BoxDecoration(
-            color: context.colors.placeholder,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: context.colors.muted.withValues(alpha: 0.3)),
+    // Merged rather than annotated: the role and the label live here, the tap
+    // action lives on the GestureDetector below, and a screen reader needs
+    // them on the same node to offer something it can activate.
+    return MergeSemantics(
+      child: Semantics(
+        button: true,
+        // The app's first action is an undecorated tap target. Without a role
+        // a screen reader reads the placeholder sentence as prose and gives no
+        // hint that the thing can be pressed at all.
+        label: photo == null
+            ? 'add a photo of something you like'
+            : 'change the photo',
+        child: AspectRatio(
+          aspectRatio: 9 / 16,
+          child: GestureDetector(
+            onTap: () => _choose(context),
+            // The placeholder sentence is already the label above; left in, it
+            // would be read out a second time.
+            child: ExcludeSemantics(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: context.colors.placeholder,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                      color: context.colors.muted.withValues(alpha: 0.3)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: photo == null
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.add_a_photo_outlined,
+                                size: 40, color: context.colors.muted),
+                            const SizedBox(height: 12),
+                            Text('add a photo of something you like',
+                                style: TextStyle(color: context.colors.muted)),
+                          ],
+                        ),
+                      )
+                    : Image.file(
+                        photo!,
+                        fit: BoxFit.cover,
+                        // The picker hands back up to 2000 px wide; the well
+                        // is ~360 pt. Uncapped, a portrait pick sits in the
+                        // image cache as tens of MB of RGBA — every other
+                        // photo site in the app caps its decode near 3x its
+                        // painted width.
+                        cacheWidth: 1200,
+                        // A file the platform decoder can't read would
+                        // otherwise throw out of build. The well already
+                        // paints colors.placeholder, so degrade to the same
+                        // muted glyph the card and the timeline use.
+                        errorBuilder: (context, _, __) => Center(
+                          child: Icon(Icons.image_not_supported_outlined,
+                              size: 40, color: context.colors.muted),
+                        ),
+                      ),
+              ),
+            ),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: photo == null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.add_a_photo_outlined, size: 40, color: context.colors.muted),
-                      const SizedBox(height: 12),
-                      Text('add a photo of something you like',
-                          style: TextStyle(color: context.colors.muted)),
-                    ],
-                  ),
-                )
-              : Image.file(photo!, fit: BoxFit.cover),
         ),
       ),
     );
