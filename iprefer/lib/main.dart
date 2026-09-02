@@ -218,8 +218,10 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Coming back is the natural moment: anything recorded offline goes up,
-    // and anything recorded on another phone comes down.
-    if (state == AppLifecycleState.resumed) _sync.syncNow();
+    // and anything recorded on another phone comes down. Not awaited: this
+    // override cannot be async, and syncNow() never throws — every failure
+    // is caught inside and reported through SyncService's own listeners.
+    if (state == AppLifecycleState.resumed) unawaited(_sync.syncNow());
   }
 
   @override

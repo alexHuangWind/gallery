@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -320,7 +322,13 @@ class _HomeShellState extends State<HomeShell> {
                       // signed-in→out edge however sign-out was reached. Doing
                       // it here as well only meant it happened twice on the one
                       // path a button can reach.
-                      context.read<Session>().signOut();
+                      //
+                      // Not awaited: this callback can't be async (onSelected
+                      // is void Function(T)), and nothing here needs to block
+                      // on it — Session notifies its listeners once signed
+                      // out, and the shell reacts to that, not to this call
+                      // returning.
+                      unawaited(context.read<Session>().signOut());
                     case _Overflow.deleteAccount:
                       _deleteAccount();
                   }
