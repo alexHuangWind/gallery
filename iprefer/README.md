@@ -290,6 +290,19 @@ Account deletion (`DELETE /v1/account`, driven from the overflow menu) erases
 the server-side account and signs the phone out; the archive itself stays on
 the phone, exactly like a plain sign-out.
 
+Sign-out flushes the queue first and, if anything still hasn't reached the
+server (offline), says how many entries would be left behind and asks.
+
+**Known limitation — one local archive per phone, not per account.** The
+entries on the phone are not partitioned by who recorded them. Signing out of
+one account and into another on the same phone shows the first account's
+local entries in the second one's timeline; they never sync there (the outbox
+refuses), and the backup line cannot know they aren't backed up, so it will
+say "backed up" for an archive that is only partly on any server. This was a
+deliberate choice over deleting photos on sign-out that might exist nowhere
+else. The right fix is a per-account partition (or a "remove local entries"
+affordance at sign-out); neither is built.
+
 ---
 
 ## Storage
