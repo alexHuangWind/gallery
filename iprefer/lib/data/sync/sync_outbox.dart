@@ -126,7 +126,8 @@ class SyncOutbox extends ChangeNotifier {
     final SyncOp op;
     try {
       final raw = _ops.get(key);
-      op = SyncOp.fromJson((jsonDecode(raw as String) as Map).cast<String, Object?>());
+      op = SyncOp.fromJson(
+          (jsonDecode(raw as String) as Map).cast<String, Object?>());
     } catch (e) {
       debugPrint('skipping an unreadable outbox row ($key): $e');
       return null;
@@ -139,8 +140,10 @@ class SyncOutbox extends ChangeNotifier {
     return op;
   }
 
-  List<Object?> get _unsendableKeys =>
-      [for (final Object? key in _ops.keys) if (_sendable(key) == null) key];
+  List<Object?> get _unsendableKeys => [
+        for (final Object? key in _ops.keys)
+          if (_sendable(key) == null) key
+      ];
 
   Future<void> _dropUnsendable() async {
     final List<Object?> keys = _unsendableKeys;

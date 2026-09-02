@@ -123,9 +123,8 @@ class Entry {
       // A name we can derive: the server's own convention is `<id>.<ext>`, so
       // guessing it keeps the photo download self-healing instead of losing an
       // entry over a field that only ever restates the id.
-      localPath: photoName is String && photoName.isNotEmpty
-          ? photoName
-          : '$id.jpg',
+      localPath:
+          photoName is String && photoName.isNotEmpty ? photoName : '$id.jpg',
       text: text is String ? text : '',
       // Epoch, not `now`: a record with an unreadable timestamp settles at the
       // bottom of the timeline instead of jumping to the top of it — and to a
@@ -292,7 +291,8 @@ List<Entry> sortedByDistanceFrom(
   // Decorate-sort-undecorate: the comparator would otherwise recompute two
   // square roots per comparison, and this runs on every archive rebuild.
   final decorated = [
-    for (final e in entries) (entry: e, metres: e.metresTo(latitude, longitude)),
+    for (final e in entries)
+      (entry: e, metres: e.metresTo(latitude, longitude)),
   ]..sort((a, b) {
       final byDistance = a.metres.compareTo(b.metres);
       if (byDistance != 0) return byDistance;
@@ -422,5 +422,7 @@ class EntryAdapter extends TypeAdapter<Entry> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is EntryAdapter && runtimeType == other.runtimeType && typeId == other.typeId;
+      other is EntryAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
 }

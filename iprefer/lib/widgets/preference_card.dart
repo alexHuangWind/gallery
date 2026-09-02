@@ -144,9 +144,8 @@ class _PreferenceCardState extends State<PreferenceCard> {
   /// provider (FileImage has value equality; an inline ResizeImage does not),
   /// and the image cache keys on ResizeImage's equatable key, so re-creating
   /// the wrapper never causes a second decode.
-  ImageProvider get _paintImage => widget.compact
-      ? ResizeImage(widget.image, width: 600)
-      : widget.image;
+  ImageProvider get _paintImage =>
+      widget.compact ? ResizeImage(widget.image, width: 600) : widget.image;
 
   /// Dark tone sampled from the bottom of the photo (value dropped in HSV).
   Color _scrim = const Color(0xCC101010);
@@ -303,7 +302,10 @@ class _Lockup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shadows = <Shadow>[
-      Shadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 8, offset: const Offset(0, 1)),
+      Shadow(
+          color: Colors.black.withValues(alpha: 0.45),
+          blurRadius: 8,
+          offset: const Offset(0, 1)),
     ];
 
     return Column(
@@ -379,7 +381,8 @@ class _Lockup extends StatelessWidget {
 /// Renders the [RepaintBoundary] behind [boundaryKey] to PNG bytes.
 ///
 /// [pixelRatio] of 3 gives a crisp, Story-ready export from the on-screen card.
-Future<Uint8List> capturePng(GlobalKey boundaryKey, {double pixelRatio = 3}) async {
+Future<Uint8List> capturePng(GlobalKey boundaryKey,
+    {double pixelRatio = 3}) async {
   // Let any in-flight scrim/photo frame settle first: toImage() captures what
   // is painted at this instant, and in debug it asserts the boundary is clean.
   await WidgetsBinding.instance.endOfFrame;

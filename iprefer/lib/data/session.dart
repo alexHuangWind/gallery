@@ -180,7 +180,8 @@ class Session extends ChangeNotifier {
       // transient Apple outage from a misconfigured entitlement — the two
       // need completely different fixes.
       debugPrint('sign in with apple failed: ${e.code} — ${e.message}');
-      throw AuthException("apple couldn't complete that sign-in (${e.code.name})");
+      throw AuthException(
+          "apple couldn't complete that sign-in (${e.code.name})");
     } on SignInWithAppleNotSupportedException {
       throw AuthException('this device cannot sign in with apple');
     }

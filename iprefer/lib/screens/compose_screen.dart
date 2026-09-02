@@ -102,7 +102,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("couldn't open that photo — try another")),
+          const SnackBar(
+              content: Text("couldn't open that photo — try another")),
         );
       }
     }
@@ -195,7 +196,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 maxLines: 3,
                 minLines: 1,
                 textCapitalization: TextCapitalization.none,
-                style: const TextStyle(fontFamily: AppTheme.serif, fontSize: 20),
+                style:
+                    const TextStyle(fontFamily: AppTheme.serif, fontSize: 20),
                 decoration: const InputDecoration(
                   hintText: 'ferns that uncurl like a slow question',
                   border: OutlineInputBorder(),
@@ -215,7 +217,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _controller,
                 builder: (context, value, _) {
-                  final canMake = _photo != null && value.text.trim().isNotEmpty;
+                  final canMake =
+                      _photo != null && value.text.trim().isNotEmpty;
                   return FilledButton(
                     // Not disabled while making: a disabled M3 button loses the
                     // ink fill and the paper spinner vanishes into it. _makeCard

@@ -14,19 +14,21 @@ class PlaceFix {
   final String? label;
 
   @override
-  String toString() => label ?? '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}';
+  String toString() =>
+      label ??
+      '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}';
 }
 
 /// Wraps the platform location stack. Every method answers with a value or
 /// null — never an exception — because location is an enhancement here, not a
 /// requirement. A cold GPS or a declined prompt must not break recording.
 abstract final class LocationService {
-
   /// True when we already hold permission. Does not prompt.
   static Future<bool> hasPermission() async {
     try {
       final p = await Geolocator.checkPermission();
-      return p == LocationPermission.always || p == LocationPermission.whileInUse;
+      return p == LocationPermission.always ||
+          p == LocationPermission.whileInUse;
     } catch (_) {
       return false;
     }

@@ -70,7 +70,8 @@ void main() {
     test('stays dark enough for white type to sit on it', () {
       for (final source in sources) {
         final hsv = HSVColor.fromColor(scrimFrom(source));
-        expect(hsv.value, lessThanOrEqualTo(0.32 + rounding), reason: '$source');
+        expect(hsv.value, lessThanOrEqualTo(0.32 + rounding),
+            reason: '$source');
       }
     });
 
@@ -183,7 +184,8 @@ void main() {
     });
 
     testWidgets('a different photo is sampled on its own', (tester) async {
-      final other = await tester.runAsync(() => _solidPng(const Color(0xFF223344)));
+      final other =
+          await tester.runAsync(() => _solidPng(const Color(0xFF223344)));
       var calls = 0;
       Future<Color?> sampler(ImageProvider image) async {
         calls++;

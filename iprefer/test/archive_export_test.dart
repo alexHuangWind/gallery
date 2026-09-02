@@ -72,7 +72,8 @@ void main() {
     final zip = await packAndRead(entries);
     final names = zip.files.map((f) => f.name).toSet();
 
-    expect(names, containsAll(['entries.json', 'photos/a.jpg', 'photos/b.jpg']));
+    expect(
+        names, containsAll(['entries.json', 'photos/a.jpg', 'photos/b.jpg']));
   });
 
   test('the photos come back byte for byte', () async {
@@ -86,11 +87,13 @@ void main() {
 
   test('the manifest describes an entry the way the wire does', () async {
     // One shape for an entry, not two that can drift.
-    final entry = write('a', 'a flat white', place: 'Cuba Street', tags: ['coffee']);
+    final entry =
+        write('a', 'a flat white', place: 'Cuba Street', tags: ['coffee']);
 
     final zip = await packAndRead([entry]);
     final manifest = jsonDecode(
-      utf8.decode(zip.files.firstWhere((f) => f.name == 'entries.json').content),
+      utf8.decode(
+          zip.files.firstWhere((f) => f.name == 'entries.json').content),
     ) as Map<String, Object?>;
 
     expect(manifest['format'], ArchiveExport.formatVersion);
@@ -125,11 +128,13 @@ void main() {
   test('a round trip rebuilds the entry', () async {
     // What an importer would actually do. If this passes, the export is a
     // real backup rather than a pile of files.
-    final entry = write('a', 'a flat white', place: 'Cuba Street', tags: ['coffee']);
+    final entry =
+        write('a', 'a flat white', place: 'Cuba Street', tags: ['coffee']);
 
     final zip = await packAndRead([entry]);
     final manifest = jsonDecode(
-      utf8.decode(zip.files.firstWhere((f) => f.name == 'entries.json').content),
+      utf8.decode(
+          zip.files.firstWhere((f) => f.name == 'entries.json').content),
     ) as Map<String, Object?>;
 
     final restored = Entry.fromSyncJson(
@@ -171,7 +176,8 @@ void main() {
 
     final zip = ZipDecoder().decodeBytes(result.file.readAsBytesSync());
     final manifest = jsonDecode(
-      utf8.decode(zip.files.firstWhere((f) => f.name == 'entries.json').content),
+      utf8.decode(
+          zip.files.firstWhere((f) => f.name == 'entries.json').content),
     ) as Map<String, Object?>;
 
     expect((manifest['entries']! as List).length, 2);
@@ -226,7 +232,8 @@ void main() {
     final zip = await packAndRead([entry]);
 
     expect(zip.files.map((f) => f.name), contains('photos/a.jpg'));
-    expect(zip.files.map((f) => f.name), isNot(contains('photos/IMG_4471.jpg')));
+    expect(
+        zip.files.map((f) => f.name), isNot(contains('photos/IMG_4471.jpg')));
   });
 
   test('the photos are stored, not deflated', () async {
@@ -260,7 +267,8 @@ void main() {
 
     final zip = await packAndRead(entries);
     final manifest = jsonDecode(
-      utf8.decode(zip.files.firstWhere((f) => f.name == 'entries.json').content),
+      utf8.decode(
+          zip.files.firstWhere((f) => f.name == 'entries.json').content),
     ) as Map<String, Object?>;
 
     expect(manifest['entriesWithoutPhotos'], ['b']);
@@ -274,7 +282,8 @@ void main() {
       write('b', 'ferns', onDisk: false),
     ]);
     final manifest = jsonDecode(
-      utf8.decode(zip.files.firstWhere((f) => f.name == 'entries.json').content),
+      utf8.decode(
+          zip.files.firstWhere((f) => f.name == 'entries.json').content),
     ) as Map<String, Object?>;
 
     expect(manifest['count'], 2);
@@ -369,8 +378,10 @@ void main() {
   });
 
   test('the file names itself by the day it was made', () {
-    expect(ArchiveExport.fileNameFor(DateTime(2026, 9, 2)), 'i-prefer-2026-09-02.zip');
-    expect(ArchiveExport.fileNameFor(DateTime(2026, 12, 25)), 'i-prefer-2026-12-25.zip');
+    expect(ArchiveExport.fileNameFor(DateTime(2026, 9, 2)),
+        'i-prefer-2026-09-02.zip');
+    expect(ArchiveExport.fileNameFor(DateTime(2026, 12, 25)),
+        'i-prefer-2026-12-25.zip');
   });
 
   test('an empty archive still produces a readable file', () async {
@@ -378,7 +389,8 @@ void main() {
     // enforces it — a zero-entry export is a valid, if dull, backup.
     final zip = await packAndRead([]);
     final manifest = jsonDecode(
-      utf8.decode(zip.files.firstWhere((f) => f.name == 'entries.json').content),
+      utf8.decode(
+          zip.files.firstWhere((f) => f.name == 'entries.json').content),
     ) as Map<String, Object?>;
 
     expect(manifest['count'], 0);

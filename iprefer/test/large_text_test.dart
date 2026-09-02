@@ -80,7 +80,8 @@ void main() {
       MultiProvider(
         providers: [
           ChangeNotifierProvider<EntryStore>.value(value: store),
-          if (view != null) ChangeNotifierProvider<ArchiveView>.value(value: view),
+          if (view != null)
+            ChangeNotifierProvider<ArchiveView>.value(value: view),
         ],
         child: MaterialApp(
           theme: AppTheme.light(),
@@ -124,7 +125,8 @@ void main() {
     // Every chip has to fit the box it was given — an overflow here is the
     // bug this test exists for, and it is silent in a release build.
     for (final chip in tester.widgetList(find.byType(EntryChip))) {
-      expect(tester.getSize(find.byWidget(chip)).height, lessThanOrEqualTo(strip));
+      expect(
+          tester.getSize(find.byWidget(chip)).height, lessThanOrEqualTo(strip));
     }
   });
 

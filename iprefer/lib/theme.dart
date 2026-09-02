@@ -189,7 +189,8 @@ class AppTheme {
           color: c.ink,
         ),
         bodyLarge: TextStyle(fontSize: 16, color: c.ink, height: 1.4),
-        bodyMedium: TextStyle(fontSize: 14, color: c.ink.withValues(alpha: 0.8)),
+        bodyMedium:
+            TextStyle(fontSize: 14, color: c.ink.withValues(alpha: 0.8)),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: c.paper,

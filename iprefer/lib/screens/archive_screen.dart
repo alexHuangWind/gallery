@@ -111,8 +111,8 @@ class ArchiveScreen extends StatelessWidget {
               delegate: SliverChildBuilderDelegate(
                 // Keyed so recycling doesn't carry one card's extracted scrim
                 // over to another photo when the list re-sorts.
-                (context, i) =>
-                    _ArchiveTile(key: ValueKey(entries[i].id), entry: entries[i]),
+                (context, i) => _ArchiveTile(
+                    key: ValueKey(entries[i].id), entry: entries[i]),
                 childCount: entries.length,
                 // Without this, a keyed child whose index moved cannot be
                 // matched to its old Element: it is rebuilt from scratch, and
@@ -150,7 +150,9 @@ class _ArchiveTile extends StatelessWidget {
         title: const Text('remove this?'),
         content: const Text('this entry leaves your timeline for good.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('keep')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('keep')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             // The only irreversible choice in the app gets the only red.
@@ -324,7 +326,8 @@ class _EmptyState extends StatelessWidget {
               style: TextStyle(color: context.colors.mutedText, height: 1.5),
             ),
             const SizedBox(height: 24),
-            FilledButton(onPressed: onStart, child: const Text('record the first one')),
+            FilledButton(
+                onPressed: onStart, child: const Text('record the first one')),
           ],
         ),
       ),

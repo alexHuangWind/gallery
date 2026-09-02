@@ -109,7 +109,9 @@ class HttpSyncApi implements SyncApi {
         .post(
           _uri('/v1/sync/push'),
           headers: _headers,
-          body: jsonEncode({'ops': [for (final o in ops) o.toJson()]}),
+          body: jsonEncode({
+            'ops': [for (final o in ops) o.toJson()]
+          }),
         )
         .timeout(timeout);
     if (res.statusCode != 200) _fail(res, 'push');
@@ -159,14 +161,14 @@ class HttpSyncApi implements SyncApi {
           body: bytes,
         )
         .timeout(timeout);
-    if (res.statusCode != 204 && res.statusCode != 200) _fail(res, 'photo upload');
+    if (res.statusCode != 204 && res.statusCode != 200)
+      _fail(res, 'photo upload');
   }
 
   @override
   Future<Uint8List?> downloadPhoto(String name) async {
-    final res = await _client
-        .get(_uri('/v1/photos/$name'), headers: {'authorization': 'Bearer $token'})
-        .timeout(timeout);
+    final res = await _client.get(_uri('/v1/photos/$name'),
+        headers: {'authorization': 'Bearer $token'}).timeout(timeout);
     if (res.statusCode == 404) return null;
     if (res.statusCode != 200) _fail(res, 'photo download');
     return res.bodyBytes;
@@ -174,9 +176,8 @@ class HttpSyncApi implements SyncApi {
 
   @override
   Future<void> deleteAccount() async {
-    final res = await _client
-        .delete(_uri('/v1/account'), headers: {'authorization': 'Bearer $token'})
-        .timeout(timeout);
+    final res = await _client.delete(_uri('/v1/account'),
+        headers: {'authorization': 'Bearer $token'}).timeout(timeout);
     // 204 is the deletion; 401 is *also* success, which is why this cannot go
     // through [_fail] — that turns a 401 into [SyncAuthExpiredException], the
     // "sign in again to resume backing up" path, which is exactly wrong here.

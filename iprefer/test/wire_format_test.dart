@@ -58,9 +58,16 @@ void main() {
     test('tags that are not a list come back empty', () {
       expect(Entry.fromSyncJson(wire({'tags': 'wine'})).tags, isEmpty);
       expect(Entry.fromSyncJson(wire({'tags': null})).tags, isEmpty);
-      expect(Entry.fromSyncJson(wire({'tags': {'wine': 1}})).tags, isEmpty);
+      expect(
+          Entry.fromSyncJson(wire({
+            'tags': {'wine': 1}
+          })).tags,
+          isEmpty);
       // A real list still normalizes as usual.
-      expect(Entry.fromSyncJson(wire({'tags': ['Wine', ' wine ']})).tags,
+      expect(
+          Entry.fromSyncJson(wire({
+            'tags': ['Wine', ' wine ']
+          })).tags,
           ['wine']);
     });
 
@@ -86,8 +93,8 @@ void main() {
     test('a missing photoName falls back to the server naming rule', () {
       expect(Entry.fromSyncJson(wire({'photoName': null})).localPath,
           'abc-123.jpg');
-      expect(Entry.fromSyncJson(wire({'photoName': ''})).localPath,
-          'abc-123.jpg');
+      expect(
+          Entry.fromSyncJson(wire({'photoName': ''})).localPath, 'abc-123.jpg');
     });
   });
 
@@ -95,8 +102,8 @@ void main() {
     test('a missing entryId is refused by name', () {
       expect(
         () => SyncOp.fromJson({'type': 'create', 'payload': const {}}),
-        throwsA(isA<MalformedSyncOp>()
-            .having((e) => e.field, 'field', 'entryId')),
+        throwsA(
+            isA<MalformedSyncOp>().having((e) => e.field, 'field', 'entryId')),
       );
     });
 

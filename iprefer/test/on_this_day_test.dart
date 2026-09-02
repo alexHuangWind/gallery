@@ -58,7 +58,9 @@ void main() {
       ),
     );
     return tester.pumpWidget(
-      boundary == null ? content : RepaintBoundary(key: boundary, child: content),
+      boundary == null
+          ? content
+          : RepaintBoundary(key: boundary, child: content),
     );
   }
 
@@ -73,7 +75,8 @@ void main() {
 
   testWidgets('an anniversary names itself and shows what you liked',
       (tester) async {
-    await seed(tester, DateTime(2025, 8, 25, 9), 'a flat white before the world wakes up');
+    await seed(tester, DateTime(2025, 8, 25, 9),
+        'a flat white before the world wakes up');
 
     await pump(tester);
 
@@ -93,8 +96,10 @@ void main() {
   });
 
   testWidgets('each chip is keyed to its entry', (tester) async {
-    await seed(tester, DateTime(2025, 8, 25, 9), 'flowers that outshout the street');
-    await seed(tester, DateTime(2025, 8, 25, 18), 'water that forgets to hurry');
+    await seed(
+        tester, DateTime(2025, 8, 25, 9), 'flowers that outshout the street');
+    await seed(
+        tester, DateTime(2025, 8, 25, 18), 'water that forgets to hurry');
 
     await pump(tester);
 
@@ -124,11 +129,13 @@ void main() {
 
   testWidgets('renders a preview png so the layout can be looked at',
       (tester) async {
-    await seed(tester, DateTime(2025, 8, 25, 9), 'flowers that outshout the whole street');
-    await seed(tester, DateTime(2025, 8, 25, 18), 'water that forgets to hurry');
+    await seed(tester, DateTime(2025, 8, 25, 9),
+        'flowers that outshout the whole street');
+    await seed(
+        tester, DateTime(2025, 8, 25, 18), 'water that forgets to hurry');
 
-    final fontBytes =
-        File('assets/fonts/PlayfairDisplay-Italic-Variable.ttf').readAsBytesSync();
+    final fontBytes = File('assets/fonts/PlayfairDisplay-Italic-Variable.ttf')
+        .readAsBytesSync();
     final loader = FontLoader('PlayfairDisplay')
       ..addFont(Future.value(ByteData.view(fontBytes.buffer)));
     await loader.load();

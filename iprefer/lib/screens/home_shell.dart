@@ -170,7 +170,9 @@ class _HomeShellState extends State<HomeShell> {
           'here, and you can keep recording without an account.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('keep it')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('keep it')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             // The red is reserved for the choices that cannot be taken back.
@@ -191,7 +193,8 @@ class _HomeShellState extends State<HomeShell> {
     } catch (e) {
       debugPrint('deleting the account failed: $e');
       messenger.showSnackBar(
-        const SnackBar(content: Text("couldn't delete your account — try again")),
+        const SnackBar(
+            content: Text("couldn't delete your account — try again")),
       );
     } finally {
       // Unmounted on success, so this only runs on the failure path.
@@ -232,7 +235,8 @@ class _HomeShellState extends State<HomeShell> {
         final anyway = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: Text('$left ${left == 1 ? 'entry isn\u2019t' : 'entries aren\u2019t'} backed up yet'),
+            title: Text(
+                '$left ${left == 1 ? 'entry isn\u2019t' : 'entries aren\u2019t'} backed up yet'),
             content: const Text(
               'signing out now drops them from the queue — they stay on this '
               'phone, but they never reach your backup.',

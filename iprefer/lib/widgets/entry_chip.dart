@@ -121,7 +121,8 @@ class EntryStrip extends StatelessWidget {
     // something the size of "116pt text" — the box would have stayed put
     // while the type inside it grew.
     final scaler = MediaQuery.textScalerOf(context);
-    final growth = scaler.scale(EntryChip.lineFontSize) / EntryChip.lineFontSize;
+    final growth =
+        scaler.scale(EntryChip.lineFontSize) / EntryChip.lineFontSize;
 
     return SizedBox(
       height: baseHeight * growth,

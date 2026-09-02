@@ -80,7 +80,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   /// build-time call by moving it into a lifecycle hook — the pin set is
   /// derived from providers only available at build time.
   void _fitTo(List<LatLng> points) {
-    final signature = points.map((p) => '${p.latitude},${p.longitude}').join(';');
+    final signature =
+        points.map((p) => '${p.latitude},${p.longitude}').join(';');
     if (signature == _fittedSignature) return;
     _fittedSignature = signature;
 

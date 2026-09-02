@@ -68,10 +68,12 @@ void main() {
   Future<Entry> record() async {
     final src = File(p.join(tempDir.path, 'pick_${seq++}.jpg'))
       ..writeAsBytesSync(List.filled(16, 3));
-    return store.create(sourcePhotoPath: src.path, text: 'a thing', createdAt: when);
+    return store.create(
+        sourcePhotoPath: src.path, text: 'a thing', createdAt: when);
   }
 
-  testWidgets('a guest is told nothing — no account, no promise', (tester) async {
+  testWidgets('a guest is told nothing — no account, no promise',
+      (tester) async {
     final sync = SyncService(api: null, outbox: outbox, store: store);
     await tester.runAsync(record);
 
@@ -96,7 +98,8 @@ void main() {
 
   testWidgets('unsynced entries are counted, and read as safe-but-not-yet',
       (tester) async {
-    final sync = SyncService(api: FakeSyncApi()..offline = true, outbox: outbox, store: store);
+    final sync = SyncService(
+        api: FakeSyncApi()..offline = true, outbox: outbox, store: store);
     await tester.runAsync(() async {
       await record();
       await record();
@@ -108,7 +111,8 @@ void main() {
   });
 
   testWidgets('one entry is singular', (tester) async {
-    final sync = SyncService(api: FakeSyncApi()..offline = true, outbox: outbox, store: store);
+    final sync = SyncService(
+        api: FakeSyncApi()..offline = true, outbox: outbox, store: store);
     await tester.runAsync(record);
 
     await pump(tester, sync);
@@ -118,7 +122,8 @@ void main() {
 
   testWidgets('an unreachable server is stated plainly, not as an error',
       (tester) async {
-    final sync = SyncService(api: FakeSyncApi()..offline = true, outbox: outbox, store: store);
+    final sync = SyncService(
+        api: FakeSyncApi()..offline = true, outbox: outbox, store: store);
     await tester.runAsync(sync.syncNow); // fails, nothing pending
 
     await pump(tester, sync);
@@ -146,7 +151,8 @@ void main() {
       expect(find.text('sign in'), findsOneWidget);
     });
 
-    testWidgets('still shows the prompt once the service is rebuilt as disabled',
+    testWidgets(
+        'still shows the prompt once the service is rebuilt as disabled',
         (tester) async {
       // What actually happens in the app: the session is marked expired, so
       // the next service is built with no api at all. The bar must keep

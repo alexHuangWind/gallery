@@ -76,7 +76,8 @@ class FakeSyncApi implements SyncApi {
     }
     pushes.add(List.of(ops));
     for (final op in ops) {
-      final already = log.any((r) => r.op.type == op.type && r.op.entryId == op.entryId);
+      final already =
+          log.any((r) => r.op.type == op.type && r.op.entryId == op.entryId);
       if (!already) log.add(RemoteOp(seq: _nextSeq++, op: op));
     }
     return log.isEmpty ? 0 : log.last.seq;
@@ -148,7 +149,8 @@ class FakeAuthClient implements AuthClient {
   /// A `_StubAuth`-shaped convenience: always exchanges cleanly for a fixed
   /// token/user pair, for tests that only need *a* signed-in session to
   /// exist and never inspect what it contains.
-  FakeAuthClient.fixed({String token = 'server-token', String userId = 'user-1'})
+  FakeAuthClient.fixed(
+      {String token = 'server-token', String userId = 'user-1'})
       : session = AppleSession(token: token, userId: userId),
         error = null;
 

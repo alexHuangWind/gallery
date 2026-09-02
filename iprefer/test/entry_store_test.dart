@@ -86,10 +86,10 @@ void main() {
       final png = writeSourcePhoto('picked.png');
       final bare = writeSourcePhoto('picked');
 
-      final fromPng =
-          await store.create(sourcePhotoPath: png.path, text: 'x', createdAt: when);
-      final fromBare =
-          await store.create(sourcePhotoPath: bare.path, text: 'y', createdAt: when);
+      final fromPng = await store.create(
+          sourcePhotoPath: png.path, text: 'x', createdAt: when);
+      final fromBare = await store.create(
+          sourcePhotoPath: bare.path, text: 'y', createdAt: when);
 
       expect(p.extension(fromPng.localPath), '.png');
       expect(p.extension(fromBare.localPath), '.jpg');
@@ -106,8 +106,9 @@ void main() {
 
       // The copied photo must not be left orphaned.
       final photosDir = Directory(photosRoot);
-      final leftovers =
-          photosDir.existsSync() ? photosDir.listSync() : const <FileSystemEntity>[];
+      final leftovers = photosDir.existsSync()
+          ? photosDir.listSync()
+          : const <FileSystemEntity>[];
       expect(leftovers, isEmpty);
     });
   });
@@ -284,8 +285,10 @@ void main() {
     });
 
     test('composes with the tag filter', () async {
-      await store.add(entryAt('wine', lat: 0.0005, lng: 0, tags: const ['wine']));
-      await store.add(entryAt('dish', lat: 0.001, lng: 0, tags: const ['dish']));
+      await store
+          .add(entryAt('wine', lat: 0.0005, lng: 0, tags: const ['wine']));
+      await store
+          .add(entryAt('dish', lat: 0.001, lng: 0, tags: const ['dish']));
 
       final hits = store.near(0, 0, tags: const {'wine'});
 

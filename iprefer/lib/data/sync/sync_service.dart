@@ -108,6 +108,7 @@ class SyncService extends ChangeNotifier {
 
   bool get enabled => _api != null;
   bool get syncing => _syncing;
+
   /// Read from storage, so it survives a relaunch and a service swap.
   DateTime? get lastSyncedAt => _outbox.lastSyncedAt;
   Object? get lastError => _lastError;
@@ -178,7 +179,8 @@ class SyncService extends ChangeNotifier {
       // calling the whole pass a failure tells the user their backup is broken
       // when the part that matters went through.
       if (photos.failed > 0) {
-        debugPrint('sync: records synced, ${photos.failed} photo(s) will retry');
+        debugPrint(
+            'sync: records synced, ${photos.failed} photo(s) will retry');
       }
       // The outbox is shared across account swaps, so even this last stamp
       // must not land for a pass that was abandoned mid-flight.
@@ -368,7 +370,8 @@ class SyncService extends ChangeNotifier {
           // retried first on every pass, so leaving it queued means every
           // photo behind it waits on a failure that cannot resolve. Drop it:
           // the entry and its local photo are untouched.
-          debugPrint('sync: giving up on photo $name, the server refused it ($e)');
+          debugPrint(
+              'sync: giving up on photo $name, the server refused it ($e)');
           await _outbox.markPhotoUploaded(name);
         } else {
           failed++;

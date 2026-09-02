@@ -153,7 +153,9 @@ void main() {
     // Build the fallback the way the framework would when a file will not
     // decode. Before this existed, that case threw straight out of build.
     final fallback = image.errorBuilder!(
-        tester.element(find.byKey(photoWellKey)), Exception('not an image'), null);
+        tester.element(find.byKey(photoWellKey)),
+        Exception('not an image'),
+        null);
     await tester.pumpWidget(
         MaterialApp(theme: AppTheme.light(), home: Scaffold(body: fallback)));
 

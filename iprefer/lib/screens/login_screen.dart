@@ -89,7 +89,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 10),
                 Text(
                   'keeps your archive if you lose or change your phone.',
-                  style: TextStyle(color: context.colors.mutedText, fontSize: 12),
+                  style:
+                      TextStyle(color: context.colors.mutedText, fontSize: 12),
                 ),
                 const SizedBox(height: 18),
               ],

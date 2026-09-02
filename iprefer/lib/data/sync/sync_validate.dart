@@ -21,7 +21,14 @@ const int kMaxTagLength = 40;
 
 /// Allowlist, not a pattern — the same set the server will accept as an object
 /// key. image_picker only ever produces these.
-const Set<String> kPhotoExtensions = {'jpg', 'jpeg', 'png', 'heic', 'heif', 'webp'};
+const Set<String> kPhotoExtensions = {
+  'jpg',
+  'jpeg',
+  'png',
+  'heic',
+  'heif',
+  'webp'
+};
 
 final RegExp _uuid = RegExp(
   r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -60,7 +67,8 @@ String? _entryProblem(Map<String, Object?> payload, String entryId) {
   if (text.runes.length > kMaxTextLength) return 'text is too long';
 
   final Object? createdAt = payload['createdAt'];
-  if (createdAt is! num || !createdAt.isFinite) return 'createdAt must be a number';
+  if (createdAt is! num || !createdAt.isFinite)
+    return 'createdAt must be a number';
 
   final Object? latitude = payload['latitude'];
   final Object? longitude = payload['longitude'];

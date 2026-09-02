@@ -145,7 +145,9 @@ class _Option extends StatelessWidget {
           color: selected ? context.colors.ink : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? context.colors.ink : context.colors.muted.withValues(alpha: 0.35),
+            color: selected
+                ? context.colors.ink
+                : context.colors.muted.withValues(alpha: 0.35),
           ),
         ),
         child: Text(

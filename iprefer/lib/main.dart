@@ -162,7 +162,9 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
     if (_initialised) _sync.dispose();
     _initialised = true;
     _sync = SyncService(
-      api: wanted == null ? null : HttpSyncApi(baseUrl: kSyncBaseUrl, token: wanted),
+      api: wanted == null
+          ? null
+          : HttpSyncApi(baseUrl: kSyncBaseUrl, token: wanted),
       outbox: widget.outbox,
       store: widget.store,
       // Record the lapse on the session so the timeline can offer one

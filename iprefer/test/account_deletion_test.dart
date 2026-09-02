@@ -14,7 +14,8 @@ import 'support/harness.dart';
 /// Answers `DELETE /v1/account` with a fixed status through [FakeSyncApi]:
 /// 204 is the deletion, 401 means the account is already gone (also
 /// success), 5xx is the server refusing.
-FakeSyncApi deleteApiAnswering(int status) => FakeSyncApi()..deleteAccountStatus = status;
+FakeSyncApi deleteApiAnswering(int status) =>
+    FakeSyncApi()..deleteAccountStatus = status;
 
 void main() {
   late TestEnv env;

@@ -5,7 +5,8 @@ import 'package:iprefer/models/entry.dart';
 /// job is to be right about dates. Calls the production function directly.
 void main() {
   var n = 0;
-  Entry at(DateTime when, {String text = 'a thing', List<String>? tags}) => Entry(
+  Entry at(DateTime when, {String text = 'a thing', List<String>? tags}) =>
+      Entry(
         id: 'id-${n++}',
         localPath: 'p.jpg',
         text: text,
@@ -51,7 +52,8 @@ void main() {
       expect(result.entries.length, 1);
     });
 
-    test('several entries from the same anniversary all come back, newest first',
+    test(
+        'several entries from the same anniversary all come back, newest first',
         () {
       final entries = [
         at(DateTime(2025, 8, 25, 8), text: 'morning'),
@@ -110,7 +112,10 @@ void main() {
 
   group('boundaries', () {
     test("today's own entries are not a memory", () {
-      final entries = [at(DateTime(2026, 8, 25, 6)), at(DateTime(2026, 8, 25, 23))];
+      final entries = [
+        at(DateTime(2026, 8, 25, 6)),
+        at(DateTime(2026, 8, 25, 23))
+      ];
 
       // Being handed back what you recorded this morning is not a memory,
       // it is the timeline you are already looking at.
@@ -127,7 +132,8 @@ void main() {
       expect(anniversaryOn([at(DateTime(2027, 8, 25))], today), isNull);
     });
 
-    test('the same day of an earlier month, not the same date, is a month match',
+    test(
+        'the same day of an earlier month, not the same date, is a month match',
         () {
       final entries = [at(DateTime(2026, 6, 25))];
 

@@ -29,7 +29,8 @@ void main() {
     await box.put(original.id, original);
     await box.close();
 
-    final restored = (await Hive.openBox<Entry>('entries_test')).get('abc-123')!;
+    final restored =
+        (await Hive.openBox<Entry>('entries_test')).get('abc-123')!;
 
     expect(restored.id, original.id);
     expect(restored.localPath, original.localPath);
@@ -64,5 +65,4 @@ void main() {
     // An unlocated entry must never satisfy a proximity test.
     expect(restored.metresTo(-37.7983, 144.9784), double.infinity);
   });
-
 }

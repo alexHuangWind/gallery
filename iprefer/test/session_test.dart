@@ -87,7 +87,8 @@ void main() {
         error: AuthException("apple couldn't confirm that sign-in"),
       );
 
-      await expectLater(session.signInWithApple(), throwsA(isA<AuthException>()));
+      await expectLater(
+          session.signInWithApple(), throwsA(isA<AuthException>()));
       expect(session.signedIn, isFalse);
       expect(session.syncToken, isNull);
     });

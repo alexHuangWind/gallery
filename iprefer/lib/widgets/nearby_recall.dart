@@ -88,10 +88,9 @@ class _NearbyRecallState extends State<NearbyRecall>
       return const SizedBox.shrink();
     }
 
-    final nearby = context
-        .watch<EntryStore>()
-        .near(here.latitude, here.longitude,
-            radiusMetres: widget.radiusMetres, tags: widget.tags);
+    final nearby = context.watch<EntryStore>().near(
+        here.latitude, here.longitude,
+        radiusMetres: widget.radiusMetres, tags: widget.tags);
     if (nearby.isEmpty) return const SizedBox.shrink();
 
     final place = here.label;
@@ -122,8 +121,7 @@ class _NearbyRecallState extends State<NearbyRecall>
                 icon: Icon(Icons.close, size: 16, color: context.colors.muted),
                 // 44pt minimum (iOS HIG) — compact density shrank the hit box
                 // of the one control that makes this banner ignorable.
-                constraints:
-                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 padding: EdgeInsets.zero,
                 tooltip: 'dismiss',
                 onPressed: () => setState(() => _dismissed = true),
