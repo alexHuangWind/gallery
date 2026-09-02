@@ -66,6 +66,13 @@ abstract class SyncApi {
 
   /// Null when the server has no photo under that name.
   Future<Uint8List?> downloadPhoto(String name);
+
+  /// Erases the account behind this token: its ops, its photos, its row.
+  ///
+  /// Returns normally when the account is gone, throws when it may not be —
+  /// which is the only distinction the caller can act on, since the local
+  /// half of a deletion must not happen while the server half might not have.
+  Future<void> deleteAccount();
 }
 
 /// Talks to `server/` over HTTP.
@@ -163,6 +170,21 @@ class HttpSyncApi implements SyncApi {
     if (res.statusCode == 404) return null;
     if (res.statusCode != 200) _fail(res, 'photo download');
     return res.bodyBytes;
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    final res = await _client
+        .delete(_uri('/v1/account'), headers: {'authorization': 'Bearer $token'})
+        .timeout(timeout);
+    // 204 is the deletion; 401 is *also* success, which is why this cannot go
+    // through [_fail] — that turns a 401 into [SyncAuthExpiredException], the
+    // "sign in again to resume backing up" path, which is exactly wrong here.
+    // The endpoint checks only the token's signature (see server/README.md),
+    // so a 401 means the token has lapsed or the users row is already gone —
+    // either way there is no account left on this phone's behalf to keep.
+    if (res.statusCode == 204 || res.statusCode == 401) return;
+    _fail(res, 'account deletion');
   }
 
   static String _contentTypeFor(String name) {

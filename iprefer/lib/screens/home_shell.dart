@@ -138,6 +138,74 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// True while the account is being deleted — same reason as [_exporting]:
+  /// the item has to look unavailable, or the second tap of an impatient
+  /// double-tap is a control that silently does nothing.
+  bool _deleting = false;
+
+  /// Asks first, then deletes the account and its backup.
+  ///
+  /// App Store Guideline 5.1.1(v). The work itself belongs to the composition
+  /// root (see `AccountDeleter` in main.dart); this screen owns the asking,
+  /// and saying so when it fails.
+  Future<void> _deleteAccount() async {
+    if (_deleting) return;
+
+    final delete = context.read<AccountDeleter>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      // The dialog's own context, like the remove-entry dialog in
+      // archive_screen: a rebuild under an open dialog must not leave the
+      // theme being read off a defunct element.
+      builder: (ctx) => AlertDialog(
+        title: const Text('delete your account?'),
+        content: const Text(
+          'your account and the backup on our server go for good.\n\n'
+          'everything on this phone stays — the entries and photos are still '
+          'here, and you can keep recording without an account.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('keep it')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            // The red is reserved for the choices that cannot be taken back.
+            style: TextButton.styleFrom(foregroundColor: ctx.colors.danger),
+            child: const Text('delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _deleting = true);
+    try {
+      await delete();
+      // Nothing to say on success: the session is gone, and main.dart swaps
+      // this whole screen for the login one. A snackbar would be addressed to
+      // a screen that no longer exists.
+    } catch (e) {
+      debugPrint('deleting the account failed: $e');
+      messenger.showSnackBar(
+        const SnackBar(content: Text("couldn't delete your account — try again")),
+      );
+    } finally {
+      // Unmounted on success, so this only runs on the failure path.
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
+  /// Whether there is an account on a server to delete, as opposed to a local
+  /// guest id. Not `syncEnabled`: a token the server has stopped accepting is
+  /// still the only handle on the account it was issued for, and the deletion
+  /// endpoint takes it (see `Session.deleteAccount`). Hiding the item from a
+  /// lapsed session would be hiding it from the person most likely to want it.
+  static bool _hasAccount(BuildContext context) {
+    final session = context.read<Session>();
+    return session.signedIn && session.syncToken != null;
+  }
+
   void _compose() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const ComposeScreen()),
@@ -253,6 +321,8 @@ class _HomeShellState extends State<HomeShell> {
                       // it here as well only meant it happened twice on the one
                       // path a button can reach.
                       context.read<Session>().signOut();
+                    case _Overflow.deleteAccount:
+                      _deleteAccount();
                   }
                 },
                 itemBuilder: (context) => [
@@ -269,6 +339,16 @@ class _HomeShellState extends State<HomeShell> {
                     value: _Overflow.signOut,
                     child: Text('sign out'),
                   ),
+                  // Only for someone who actually has an account to delete. A
+                  // guest has a local id and nothing on any server, so the item
+                  // would offer to destroy something that was never made —
+                  // read, not watched, because the menu is built when it opens.
+                  if (_hasAccount(context))
+                    PopupMenuItem(
+                      value: _Overflow.deleteAccount,
+                      enabled: !_deleting,
+                      child: Text(_deleting ? 'deleting…' : 'delete account'),
+                    ),
                 ],
               ),
           ],
@@ -356,4 +436,4 @@ class _SearchField extends StatelessWidget {
 }
 
 /// The app bar's overflow items.
-enum _Overflow { export, signOut }
+enum _Overflow { export, signOut, deleteAccount }

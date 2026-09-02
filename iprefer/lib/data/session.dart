@@ -4,12 +4,22 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:uuid/uuid.dart';
 
 import 'sync/auth_client.dart';
+import 'sync/sync_api.dart';
 import 'sync/sync_config.dart';
+import 'sync/sync_outbox.dart';
 
 /// Performs the native Sign in with Apple prompt and returns Apple's identity
 /// token, or null if the person backed out. A seam, so signing in is testable
 /// without a device or a developer account.
 typedef AppleIdentityTokenProvider = Future<String?> Function();
+
+/// Deletes the signed-in account — server side, then this phone.
+///
+/// A seam for the same reason [AppleIdentityTokenProvider] is one: the screen
+/// that offers the item should not have to know which server it talks to, nor
+/// what else on this phone has to forget the account. `main.dart` builds it
+/// out of [Session.deleteAccount] and hands it down.
+typedef AccountDeleter = Future<void> Function();
 
 /// Who is using the app, and whether their archive is backed up.
 ///
@@ -114,6 +124,32 @@ class Session extends ChangeNotifier {
     await _box.delete(_tokenKey);
     await _box.delete(_expiredKey);
     notifyListeners();
+  }
+
+  /// Erases the account, on the server and then here.
+  ///
+  /// App Store Guideline 5.1.1(v): an app that lets you make an account has to
+  /// let you delete it from inside the app. [api] does the server half; what
+  /// is left is making this phone stop believing in an account that no longer
+  /// exists — which is [signOut] plus one thing more, hence the [outbox].
+  ///
+  /// The order is the whole substance of this method:
+  ///  - the server first, and nothing local at all if it refuses. Clearing the
+  ///    session on a 5xx would leave an account nobody can reach to delete.
+  ///  - [SyncOutbox.forgetAccount] before [signOut], because signing out
+  ///    notifies, and main.dart answers that notification with
+  ///    `outbox.reset()` — which keeps the account markers on purpose. Forget
+  ///    first and the reset that follows has nothing left to preserve.
+  ///
+  /// The archive itself stays on this phone, same as for a sign-out: deleting
+  /// an account is not asking for your photos to be thrown away.
+  Future<void> deleteAccount(SyncApi api, {required SyncOutbox outbox}) async {
+    // TODO(sign-in-with-apple): Apple expects the sign-in grant to be revoked
+    // as well, which the server cannot do yet (it needs a Services key) — see
+    // the matching TODO in server/src/index.ts. Nothing to send from here.
+    await api.deleteAccount();
+    await outbox.forgetAccount();
+    await signOut();
   }
 
   /// The real prompt. Kept out of [signInWithApple] so the flow around it can

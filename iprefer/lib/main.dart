@@ -176,6 +176,29 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
     return true;
   }
 
+  /// Deletes the account this phone is signed into.
+  ///
+  /// Here rather than in the shell because everything it needs — which server,
+  /// which token, which outbox — is the composition root's to know, and the
+  /// shell should be able to offer the item without holding any of it.
+  /// [Session.deleteAccount] owns what happens in what order; this only
+  /// supplies the parts.
+  ///
+  /// A fresh api rather than the sync service's: [_configureSync] builds one
+  /// only while `syncEnabled`, and a lapsed token must still be able to delete
+  /// the account it belongs to. Deletion is the one call a 30-day-old token is
+  /// still good for.
+  Future<void> _deleteAccount() async {
+    final token = widget.session.syncToken;
+    // Unreachable from the UI — the item is only offered with a token — but
+    // returning quietly here would look exactly like a successful deletion.
+    if (token == null) throw StateError('no account to delete');
+    await widget.session.deleteAccount(
+      HttpSyncApi(baseUrl: kSyncBaseUrl, token: token),
+      outbox: widget.outbox,
+    );
+  }
+
   Future<void> _syncAfterSignIn(String userId) async {
     try {
       // Anything recorded as a guest predates the account and has never been
@@ -219,6 +242,9 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
         ChangeNotifierProvider<ArchiveView>.value(value: _view),
         // So the timeline can say whether the archive is actually backed up.
         ChangeNotifierProvider<SyncService>.value(value: _sync),
+        // The one destructive account action, handed down as a callback so the
+        // shell can offer it without owning a server url or the outbox.
+        Provider<AccountDeleter>.value(value: _deleteAccount),
       ],
       child: MaterialApp(
         title: 'I prefer',
