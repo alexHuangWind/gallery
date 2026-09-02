@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -7,12 +8,24 @@ import 'package:palette_generator/palette_generator.dart';
 
 import '../theme.dart';
 
+/// How the scrim tone gets read off a photo. Returns null when the photo has
+/// nothing to say — the card then keeps its neutral fallback scrim.
+///
+/// A seam, not an abstraction: the real implementation is
+/// [samplePaletteScrim]. It exists so a test can hand the card a colour
+/// synchronously instead of waiting out PaletteGenerator's own decode and
+/// 15 s timeout for an image it already knows the answer for.
+typedef ScrimSampler = Future<Color?> Function(ImageProvider image);
+
 /// The card. First principle from the spec: **don't fight the photo.**
 /// Full-bleed 9:16 image, a scrim pulled from the photo's own bottom tone, and
 /// the signature lockup. No frames, no stickers, no outside colors.
 ///
 /// Wrap the instance you intend to export with a [RepaintBoundary] keyed by
 /// [boundaryKey], then call [capturePng] to get a PNG.
+///
+/// Type on the card is fixed and does not follow the phone's text scale — see
+/// the note in [State.build]. Everything else in the app does.
 class PreferenceCard extends StatefulWidget {
   const PreferenceCard({
     super.key,
@@ -22,6 +35,7 @@ class PreferenceCard extends StatefulWidget {
     this.placeLabel,
     this.boundaryKey,
     this.compact = false,
+    this.sampleScrim = samplePaletteScrim,
   });
 
   final ImageProvider image;
@@ -40,8 +54,77 @@ class PreferenceCard extends StatefulWidget {
   /// Smaller type scale for grid thumbnails.
   final bool compact;
 
+  /// Where the scrim tone comes from. Only tests pass anything else.
+  final ScrimSampler sampleScrim;
+
   @override
   State<PreferenceCard> createState() => _PreferenceCardState();
+}
+
+/// Scrim tones already worked out, newest use last.
+///
+/// Grid tiles are keyed by entry id, so scrolling one off the list and back on
+/// destroys and recreates its State — and without this every one of those
+/// round trips paid for another decode plus quantization of the same photo.
+///
+/// Capped, and deliberately holding nothing but a provider and a colour: at 64
+/// entries there is no meaningful amount of anyone's archive sitting here after
+/// a sign-out, and the cap evicts what there is as the next account scrolls.
+final LinkedHashMap<ImageProvider, Color> _scrimCache =
+    LinkedHashMap<ImageProvider, Color>();
+const int _scrimCacheLimit = 64;
+
+/// Least-recently-used, by re-inserting on read: [LinkedHashMap] keeps
+/// insertion order, so the oldest key is always the first one.
+Color? _cachedScrim(ImageProvider image) {
+  final hit = _scrimCache.remove(image);
+  if (hit != null) _scrimCache[image] = hit;
+  return hit;
+}
+
+void _cacheScrim(ImageProvider image, Color scrim) {
+  _scrimCache.remove(image);
+  _scrimCache[image] = scrim;
+  while (_scrimCache.length > _scrimCacheLimit) {
+    _scrimCache.remove(_scrimCache.keys.first);
+  }
+}
+
+/// Visible to tests only, so one test's cached tones can't decide another's.
+@visibleForTesting
+void clearScrimCache() => _scrimCache.clear();
+
+/// The real sampler: quantize the bottom of the photo and take its dominant
+/// tone.
+///
+/// `region` is expressed in the coordinate space of `size`, so we sample the
+/// bottom third of a small 9:16 proxy — where the text will sit.
+Future<Color?> samplePaletteScrim(ImageProvider image) async {
+  const size = Size(120, 213);
+  final palette = await PaletteGenerator.fromImageProvider(
+    image,
+    size: size,
+    region: const Rect.fromLTRB(0, 142, 120, 213),
+    maximumColorCount: 8,
+  );
+  return palette.dominantColor?.color ??
+      palette.darkMutedColor?.color ??
+      const Color(0xFF101010);
+}
+
+/// The scrim the spec asks for, from a tone sampled out of the photo: drop the
+/// value (and ease the saturation) so it reads as a deep tone *of that photo* —
+/// never a loud color, and never the generic black bar the spec rules out.
+///
+/// Pure on purpose. This is the whole of the card's colour promise, so it is
+/// worth being able to assert on it without rendering anything.
+Color scrimFrom(Color source) {
+  final hsv = HSVColor.fromColor(source);
+  return hsv
+      .withValue((hsv.value * 0.35).clamp(0.0, 0.32))
+      .withSaturation((hsv.saturation * 0.7).clamp(0.0, 0.6))
+      .toColor()
+      .withValues(alpha: 0.92);
 }
 
 class _PreferenceCardState extends State<PreferenceCard> {
@@ -89,29 +172,28 @@ class _PreferenceCardState extends State<PreferenceCard> {
 
   Future<void> _extractScrim() async {
     final request = ++_scrimRequest;
-    try {
-      // `region` is expressed in the coordinate space of `size`, so we sample
-      // the bottom third of a small 9:16 proxy — where the text will sit.
-      const size = Size(120, 213);
-      final palette = await PaletteGenerator.fromImageProvider(
-        _paintImage,
-        size: size,
-        region: const Rect.fromLTRB(0, 142, 120, 213),
-        maximumColorCount: 8,
-      );
-      final source = palette.dominantColor?.color ??
-          palette.darkMutedColor?.color ??
-          const Color(0xFF101010);
+    final image = _paintImage;
 
-      // Drop the value (and ease the saturation) so the scrim reads as a deep
-      // tone of the photo — never pure black, never a loud color.
-      final hsv = HSVColor.fromColor(source);
-      final scrim = hsv
-          .withValue((hsv.value * 0.35).clamp(0.0, 0.32))
-          .withSaturation((hsv.saturation * 0.7).clamp(0.0, 0.6))
-          .toColor();
+    // Before any await, so a cached tone is already on the field by the time
+    // the build that follows initState / didUpdateWidget runs — a scrolled-back
+    // tile paints its real scrim on its first frame rather than flashing the
+    // neutral fallback. A plain assignment rather than setState for the same
+    // reason: both callers are immediately followed by a build.
+    final cached = _cachedScrim(image);
+    if (cached != null) {
+      _scrim = cached;
+      return;
+    }
+
+    try {
+      final source = await widget.sampleScrim(image);
+      if (source == null) return; // nothing to pull from; keep the fallback
+      final scrim = scrimFrom(source);
+      // Cache before the guards: the tone is right for this photo whether or
+      // not this particular State still wants it.
+      _cacheScrim(image, scrim);
       if (!mounted || request != _scrimRequest) return; // a newer photo won
-      setState(() => _scrim = scrim.withValues(alpha: 0.92));
+      setState(() => _scrim = scrim);
     } catch (_) {
       // Keep the neutral fallback scrim; a failed sample must not break the card.
     }
@@ -176,10 +258,25 @@ class _PreferenceCardState extends State<PreferenceCard> {
       ),
     );
 
+    // The card ignores the phone's text scale — every size in the lockup is
+    // fixed. [capturePng] exports exactly what is painted, so with
+    // accessibility type at 2x the lockup would swallow the photo and clip off
+    // the top of the tile, and two phones would produce different PNGs from
+    // the same entry. This is the same argument that exempts this file from
+    // the palette rule (see test/palette_discipline_test.dart): what the card
+    // promises is one artifact, not a rendering of the sender's settings.
+    //
+    // The compact tile does not scale either, even though it is on-screen UI.
+    // It is a preview of that artifact — a tile whose type ran at 2x while the
+    // card it opens does not would be lying about what tapping it gives you —
+    // and its shadow is sized for exactly this type. The words are never
+    // trapped: the tile caps at two lines and a tap opens the full text.
+    final fixedType = MediaQuery.withNoTextScaling(child: card);
+
     if (widget.boundaryKey != null) {
-      return RepaintBoundary(key: widget.boundaryKey, child: card);
+      return RepaintBoundary(key: widget.boundaryKey, child: fixedType);
     }
-    return card;
+    return fixedType;
   }
 }
 
