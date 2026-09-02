@@ -154,7 +154,8 @@ class SyncOutbox extends ChangeNotifier {
   ///
   /// Survives [reset] on purpose: it is the only record that *some* account
   /// has already synced on this phone, which is what [adoptExisting] needs
-  /// after a sign-out has wiped everything else.
+  /// after a sign-out has wiped everything else. Only [forgetAccount] — i.e.
+  /// the account being deleted outright — clears it.
   String? get accountId => _meta.get(_accountKey) as String?;
 
   /// Binds the outbox to [userId] and, on a genuine guest → account upgrade,
@@ -246,6 +247,23 @@ class SyncOutbox extends ChangeNotifier {
   /// again. [adoptExisting] is what stops those entries reaching another
   /// account.
   Future<void> reset() => _clearAccountState();
+
+  /// [reset], plus the two markers it deliberately keeps.
+  ///
+  /// For account *deletion*, where those markers would be a lie: they say "an
+  /// account has synced here", and the account they refer to no longer exists
+  /// anywhere. Left in place, the next sign-in on this phone would skip
+  /// adoption and start pulling from a cursor into a log the server has
+  /// erased — an archive sitting right here, never offered to the new account.
+  /// Cleared, that sign-in looks like the first one, which is what it is.
+  ///
+  /// The entries and photos stay on the phone, exactly as in [reset]: the
+  /// person deleted their account, not their archive.
+  Future<void> forgetAccount() async {
+    await _meta.delete(_accountKey);
+    await _meta.delete(_adoptedKey);
+    await _clearAccountState();
+  }
 
   /// Everything an account accumulated, minus the two markers that say an
   /// account has been here at all — those must outlive a sign-out or the next

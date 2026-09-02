@@ -57,6 +57,11 @@ class _StubApi implements SyncApi {
     if (expired || offline) _fail();
     return null;
   }
+
+  @override
+  Future<void> deleteAccount() async {
+    if (expired || offline) _fail();
+  }
 }
 
 class _StubAuth implements AuthClient {

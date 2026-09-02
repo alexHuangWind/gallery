@@ -49,6 +49,13 @@ class FakeSyncApi implements SyncApi {
   /// Holds a pull open, so a test can act (sign out, say) mid-pass.
   Completer<void>? pullGate;
 
+  int deleteAccountCalls = 0;
+
+  /// What `DELETE /v1/account` answers with. 204 is the deletion; 401 means
+  /// the account is already gone, which the client also takes as success; a
+  /// 5xx is the failure worth retrying.
+  int deleteAccountStatus = 204;
+
   void _guard() {
     if (expired) throw SyncAuthExpiredException();
     if (offline) throw SyncApiException('offline');
@@ -99,6 +106,17 @@ class FakeSyncApi implements SyncApi {
       seq: page.isEmpty ? since : page.last.seq,
       hasMore: after.length > page.length,
     );
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    deleteAccountCalls++;
+    // Mirrors HttpSyncApi: 204 and 401 both mean "no account left to keep";
+    // anything else is the server refusing, and the client must not touch
+    // its local state on that answer.
+    if (deleteAccountStatus == 204 || deleteAccountStatus == 401) return;
+    throw SyncApiException('account deletion failed: HTTP $deleteAccountStatus',
+        statusCode: deleteAccountStatus);
   }
 
   @override
