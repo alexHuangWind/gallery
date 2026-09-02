@@ -3,19 +3,22 @@
 Photograph one small thing you like, caption it `I prefer ...`, and keep a quiet
 record of your taste — anchored to *when* and *where* you liked it.
 
-Flutter, iOS and Android. Local-only: no backend, no accounts, no network except
-map tiles.
+Flutter, iOS and Android. **Local-first**: the phone is the source of truth and
+the app is complete with no account at all. Signing in with Apple is optional
+and turns on backup/sync against a small Cloudflare Workers backend — see
+[Accounts and sync](#accounts-and-sync).
 
 ---
 
 ## Status
 
 **Compiled and exercised on a real machine** (2026-08-20, Flutter 3.44.1
-stable): `flutter analyze` is clean, all 35 tests pass, a debug APK builds,
-the app builds and runs on the iOS simulator. The full recording flow has been
-walked by hand there — photo → caption → tags → card → save/share export,
-with location granted and with it denied, map pins and filter refits,
-return-to-place recall, and kill-and-relaunch persistence.
+stable): `flutter analyze` is clean, all 277 tests pass (across 24 files —
+see [Tests](#tests) below), a debug APK builds, the app builds and runs on the
+iOS simulator. The full recording flow has been walked by hand there — photo
+→ caption → tags → card → save/share export, with location granted and with
+it denied, map pins and filter refits, return-to-place recall, and
+kill-and-relaunch persistence.
 
 The history matters if you're reading the commits: the code was originally
 written in an environment with no Flutter SDK, hardened by three adversarial
@@ -118,7 +121,7 @@ flutter create --platforms=android --org com.iprefer .
 
 | | |
 |---|---|
-| **Stub login** | a "continue" screen minting a *local* user id. No auth. |
+| **Login** | continue as a guest (local id, no account), or **Sign in with Apple** — real, not stubbed. See [Accounts and sync](#accounts-and-sync). |
 | **Compose** | pick or take a photo, write the `I prefer ...` line, add tags. |
 | **The card** | the centerpiece — see below. |
 | **Card screen** | primary **save**, secondary **share** (system share of the exported PNG). |
@@ -128,6 +131,10 @@ flutter create --platforms=android --org com.iprefer .
 | **Return-to-place recall** | standing somewhere you've recorded before resurfaces what you liked there. |
 | **Tags** | label an entry on the way in; one filter drives both tabs. |
 | **Sort** | newest-first, or nearest-first by distance from where you're standing. |
+| **Search** | free-text query (`ArchiveView.query`) narrows the timeline and the map together. |
+| **Dark mode** | follows the system appearance; `AppColors` (a `ThemeExtension`, `lib/theme.dart`) re-picks every colour rather than inverting the light palette. |
+| **Local export** | "save a copy" zips the whole archive — every entry plus its photo — to the share sheet (`ArchiveExport` + `ArchiveExportRunner`). Works signed-in or as a guest. |
+| **Account deletion** | in the overflow menu, signed-in only: erases the account on the server, then this phone. |
 
 ---
 
@@ -167,17 +174,23 @@ lib/
 
   data/entry_store.dart         # Hive CRUD, tag + proximity queries, photo files
   data/location_service.dart    # permission posture, fixes, reverse geocoding
-  data/archive_view.dart        # tag selection + sort, shared by timeline and map
-  data/session.dart             # stubbed local "login"
+  data/archive_view.dart        # tag selection + search + sort, shared by timeline and map
+  data/session.dart             # guest id, Sign in with Apple, account deletion
+  data/archive_export.dart      # packs the archive into a zip
+  data/archive_export_runner.dart # runs an export end to end (temp dir, share sheet)
+  data/sync/                    # the sync client — see server/README.md for the backend
 
   widgets/preference_card.dart  # the card + palette scrim + capturePng
   widgets/nearby_recall.dart    # "you've been here before"
   widgets/tag_input.dart        # compose-time tag editor
   widgets/tag_filter_bar.dart   # tag filter chips
   widgets/sort_bar.dart         # newest / nearest toggle
+  widgets/backup_bar.dart       # sync status strip (lapsed / syncing / backed up)
+  widgets/entry_chip.dart       # a single entry, reused by recall and "on this day"
+  widgets/on_this_day.dart      # anniversary recall
 
-  screens/login_screen.dart
-  screens/home_shell.dart       # two tabs: timeline + map
+  screens/login_screen.dart     # guest or Sign in with Apple
+  screens/home_shell.dart       # two tabs, search, and the overflow menu
   screens/compose_screen.dart
   screens/card_screen.dart
   screens/archive_screen.dart   # the timeline
@@ -251,6 +264,34 @@ the ordering, it never empties the archive.
 
 ---
 
+## Accounts and sync
+
+Signing in is an **upgrade, never a gate** — every feature above works for a
+guest, same as before there was a backend. `data/session.dart` holds two ways
+in: a local guest id (unchanged from the original stub), and **Sign in with
+Apple**, which is fully wired — native prompt via `sign_in_with_apple`, server
+exchange in `server/src/apple.ts`, session token stored in Hive. There is no
+Firebase and no Google sign-in anywhere in this app.
+
+Signing in turns on sync against `server/` (Cloudflare Workers + D1 + R2 —
+see [`server/README.md`](./server/README.md) for the backend). The design in
+one paragraph: entries are created and deleted, never edited, so the server is
+an **append-only op log per user**; the client (`data/sync/`) pushes its
+pending ops in chunks and pulls everything after a cursor. Pushes are
+**idempotent** — a retried push after a dropped response applies nothing
+twice. The **pull cursor advances only from a pull response**, never from what
+a push reports, because another device's op can hold a lower sequence number
+this client hasn't seen yet. `SyncOutbox` refuses to **adopt a different
+account's local archive**: switching from guest to a real account uploads
+what's on the phone, but signing out and into a *second* account does not —
+that archive arrives by pull instead, the same way it would on a new phone.
+
+Account deletion (`DELETE /v1/account`, driven from the overflow menu) erases
+the server-side account and signs the phone out; the archive itself stays on
+the phone, exactly like a plain sign-out.
+
+---
+
 ## Storage
 
 Hive, one box of `Entry`:
@@ -292,13 +333,34 @@ Things worth knowing before you change this:
 flutter test
 ```
 
+277 tests across 24 files:
+
 | file | covers |
 |---|---|
 | `entry_adapter_test.dart` | current-version Hive round-trips, located and unlocated |
 | `legacy_adapter_test.dart` | hand-built 4-field and 7-field on-disk records still read |
+| `entry_store_test.dart` | Hive CRUD, tag + proximity queries, photo file handling |
 | `proximity_test.dart` | haversine distances, the infinity sentinel, radius bounds |
 | `tags_test.dart` | normalization, OR filtering, `hasTag` matching |
 | `sort_test.dart` | distance ordering, the unlocated tiebreak, the NaN-antipode case |
+| `anniversary_test.dart` | "on this day" date matching |
+| `on_this_day_test.dart` | the return-to-place / anniversary recall widget |
+| `archive_view_test.dart` | tag selection, sort state machine, the pure view logic |
+| `search_test.dart` | free-text matching, including "matches nothing" |
+| `search_ui_test.dart` | the search bar wired into the timeline and map |
+| `compose_test.dart` | the compose screen: photo, caption, tags |
+| `large_text_test.dart` | layout under large system text sizes |
+| `preference_card_test.dart` | the card render and its palette scrim |
+| `palette_discipline_test.dart` | no raw `Color` outside `theme.dart`'s palette |
+| `theme_test.dart` | light/dark contrast ratios, `AppColors` lerp/equality |
+| `semantics_test.dart` | accessibility labels and roles |
+| `session_test.dart` | guest and Apple sign-in, sign-out, token expiry |
+| `account_deletion_test.dart` | `Session.deleteAccount` ordering and failure modes |
+| `backup_bar_test.dart` | the sync status strip (lapsed / syncing / backed up) |
+| `archive_export_test.dart` | `ArchiveExport` zip contents, missing-photo handling |
+| `archive_export_runner_test.dart` | the export run (temp dir, share sheet, cleanup) |
+| `sync_test.dart` | push/pull orchestration, idempotency, the cursor rule, against a fake server |
+| `wire_format_test.dart` | the client survives malformed/unexpected server payloads |
 
 Tests call the **production** functions (`normalizeTags`, `haversineMetres`,
 `entriesWithAnyTag`, `sortedByDistanceFrom`). An earlier version re-implemented
@@ -324,10 +386,13 @@ breaks only that file, not the whole suite.
   far past the 3.27 deprecation). This sets the project's effective SDK floor
   at Flutter 3.27; on anything older the mechanical reverse
   (`x.withValues(alpha: 0.8)` → `x.withOpacity(0.8)`) restores it.
-- **Login is a local stub.** `data/session.dart` and `screens/login_screen.dart`
-  carry `TODO(firebase)` markers showing exactly where Google sign-in plugs in.
-  The rest of the app reads `Session.signedIn` / `Session.userId` and won't
-  change. Wiring it needs the owner's Firebase console.
+- **Account deletion doesn't revoke the Apple grant.** `DELETE /v1/account`
+  erases everything on our side, but Apple also expects
+  `POST https://appleid.apple.com/auth/revoke`, which needs a Services ID and
+  a `.p8` key/kid this project doesn't have yet (`TODO(sign-in-with-apple)` in
+  `lib/data/session.dart` and `server/src/index.ts`). The person can sign back
+  in afterwards; it lands on a fresh, empty account, which is correct but not
+  the whole obligation.
 - **Per-frame cost is unoptimized.** `tagCounts` / `tagsByUse` / `entries` each
   walk the whole box, and several widgets call them per build. Fine for a
   personal archive; memoize behind a dirty flag if it ever isn't.
@@ -337,8 +402,11 @@ breaks only that file, not the whole suite.
 ## Not built, on purpose
 
 AI enhancement (that's v2) · likes / public feed / follow · edit history ·
-multi-language · multiple card templates · account management · cloud sync ·
-any auth backend.
+multi-language · multiple card templates.
+
+Account management and cloud sync *are* built — see
+[Accounts and sync](#accounts-and-sync) — this list is only what's still
+deliberately out of scope.
 
 **v2, when it comes:** AI enhancement as the paid tier — free stays the
 plain-photo card. Three candidate routes exist (full repaint /

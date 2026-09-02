@@ -5,8 +5,9 @@ The sync backend. Cloudflare Workers + D1 (records) + R2 (photos).
 **Deployed:** `https://iprefer-sync.alex-apps.workers.dev`
 (D1 `iprefer-sync`, R2 `iprefer-photos`, account alexnz.2046@gmail.com)
 
-Reachable but deliberately unusable until Sign in with Apple lands: the only
-token-minting endpoint is the dev one, and it does not exist in production.
+Two ways to get a token: `/v1/auth/apple` (Sign in with Apple — the real
+path) and `/v1/auth/dev` (guarded by `DEV_AUTH`, which only ever lives in
+`.dev.vars` and therefore never reaches production — see "Deploying").
 
 Nothing about the phone changes: it stays the source of truth and never blocks
 on this service. This is the other half — the part that means a reinstall or a
@@ -141,13 +142,10 @@ with the dev fallback secret, which proves production is using the real one.
 
 ## Not done yet
 
-- Sign in with Apple. Note `APPLE_ID_AUTH` is not a one-call API enable — it
-  returns 409 "Please select at least one configuration for Sign In with
-  Apple". Enabling it also invalidates the existing provisioning profile, so
-  it needs doing together with a profile rebuild.
-- Wiring the sync service into app startup (needs a signed-in user)
-- The app side of account deletion: a destructive item in settings that calls
-  `DELETE /v1/account`, then clears the local session. The endpoint exists and
-  is tested; nothing in `lib/` calls it yet, so the guideline is not satisfied
-  until it does.
-- Revoking the Apple grant on deletion — see above; blocked on a Services key.
+Sign in with Apple, sync wired into app startup, and the app-side account
+deletion item are all done — see `iprefer/README.md`'s "Accounts and sync".
+What's actually left:
+
+- Revoking the Sign in with Apple grant on account deletion — see the
+  "Account deletion" section above; blocked on a Services ID and a `.p8` key
+  this project doesn't have.

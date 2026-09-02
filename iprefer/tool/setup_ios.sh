@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 #
-# One-time iOS bootstrap. Run from the iprefer/ directory on a Mac with Xcode.
+# One-time iOS bootstrap. This is what generated the `ios/` folder that is now
+# checked into the repo — kept here as the record of how it was produced, not
+# as a script meant to run again.
 #
-#   ./tool/setup_ios.sh
+# DO NOT re-run this against the checked-in project. `flutter create` rewrites
+# Runner.xcodeproj/project.pbxproj from scratch, which drops things this
+# script cannot re-add for you: `Runner/Runner.entitlements` (Sign in with
+# Apple), the `CODE_SIGN_ENTITLEMENTS` reference to it, and `DEVELOPMENT_TEAM`.
+# Losing any of those silently breaks Apple sign-in the next time someone
+# builds. If `ios/` ever needs to be regenerated for real, redo those three
+# things by hand afterwards — see `ios/Runner/Runner.entitlements` and the
+# team id in `tool/README.md`.
 #
-# Why a script instead of a checked-in ios/ folder: Runner.xcodeproj/project.pbxproj
-# is a machine-generated file full of UUIDs. Generating it with the real Flutter
-# tool is correct by construction; hand-writing it is not. This script generates
-# it, then adds the things `flutter create` does NOT know about — the permission
-# usage strings, which iOS requires (a missing one is a hard crash, not a denial).
-#
-# Safe to re-run: every edit below is idempotent.
+# What it did: generated the Xcode project with the real Flutter tool
+# (correct by construction; hand-writing project.pbxproj's UUIDs is not),
+# then added the things `flutter create` does NOT know about — the
+# permission usage strings iOS requires (a missing one is a hard crash, not
+# a denial) — and wired plugins.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
