@@ -127,8 +127,13 @@ class FakeSyncApi implements SyncApi {
     photos[name] = bytes;
   }
 
+  /// Holds a download open, so a test can dispose the service mid-photo and
+  /// prove nothing is written afterwards.
+  Completer<void>? downloadGate;
+
   @override
   Future<Uint8List?> downloadPhoto(String name) async {
+    if (downloadGate != null) await downloadGate!.future;
     _guard();
     return photos[name];
   }

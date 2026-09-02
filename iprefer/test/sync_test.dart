@@ -619,6 +619,27 @@ void main() {
       expect(onDisk.readAsBytesSync(), [1, 2, 3, 4]);
     });
 
+    test('a download landing after dispose is not written', () async {
+      // The one write the mutation probe found unguarded by test: delete the
+      // generation check before writePhotoBytes and nothing noticed. A pass
+      // abandoned mid-download must not land the previous account's photo in
+      // whatever archive is current by the time the bytes arrive.
+      const id = '10101010-1010-4010-8010-101010101010';
+      api.seedRemote(SyncOp.create(remoteEntry(id)));
+      api.photos['$id.jpg'] = Uint8List.fromList([9, 9, 9]);
+      api.downloadGate = Completer<void>();
+
+      final pass = sync.syncNow();
+      // Let the pass reach the gated download before pulling the rug.
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      sync.dispose();
+      api.downloadGate!.complete();
+      await pass;
+
+      expect(File(p.join(photosRoot, '$id.jpg')).existsSync(), isFalse);
+    });
+
     test('an entry whose photo the other device has not uploaded yet is fine',
         () async {
       const id = '99999999-9999-4999-8999-999999999999';
