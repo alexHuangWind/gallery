@@ -180,6 +180,9 @@ class SyncService extends ChangeNotifier {
       if (photos.failed > 0) {
         debugPrint('sync: records synced, ${photos.failed} photo(s) will retry');
       }
+      // The outbox is shared across account swaps, so even this last stamp
+      // must not land for a pass that was abandoned mid-flight.
+      if (_abandoned(generation)) return const SyncResult();
       await _outbox.recordSyncedNow();
       _lastError = null;
     } on SyncAuthExpiredException catch (e) {

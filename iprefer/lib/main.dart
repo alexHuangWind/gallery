@@ -205,8 +205,14 @@ class _IPreferAppState extends State<IPreferApp> with WidgetsBindingObserver {
       // offered to the server. The outbox decides whether this is that case:
       // a *second* account on this phone adopts nothing, or it would upload
       // the first account's archive into the second one's.
+      // Captured before the await: adoptExisting is a Hive write per entry,
+      // and a second session change can land during it. Reading `_sync`
+      // afterwards would push the ops adopted for this account with whatever
+      // token is current by then. The captured service guards its own
+      // disposal, so a stale one simply does nothing.
+      final sync = _sync;
       await widget.outbox.adoptExisting(widget.store.entries, userId: userId);
-      await _sync.syncNow();
+      await sync.syncNow();
     } catch (e, stack) {
       // Nobody awaits this pass, so a failed Hive write used to escape as an
       // unhandled async error. Backing up is best-effort by construction: the

@@ -108,11 +108,19 @@ class ArchiveExportRunner {
       );
       onOutcome?.call(outcome);
 
-      await _share(XFile(result.file.path), origin);
+      try {
+        await _share(XFile(result.file.path), origin);
+      } catch (e) {
+        // The archive packed; only the sheet failed to open. That is the OS's
+        // to explain, and a second outcome here would tell the person their
+        // archive "couldn't pack" seconds after being told it had — and
+        // break the promise that onOutcome fires once.
+        debugPrint('share sheet failed after a successful pack: $e');
+      }
       return outcome;
     } catch (e) {
-      // Recorded, because disk-full, an unreadable photo and a share sheet
-      // that refused to open all reach the user as one sentence.
+      // Recorded, because disk-full and an unreadable photo both reach the
+      // user as one sentence.
       debugPrint('export failed: $e');
       const outcome = ExportOutcome.failed();
       onOutcome?.call(outcome);

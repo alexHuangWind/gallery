@@ -5,6 +5,7 @@ import '../data/archive_export_runner.dart';
 import '../data/archive_view.dart';
 import '../data/entry_store.dart';
 import '../data/session.dart';
+import '../data/sync/sync_service.dart';
 import '../theme.dart';
 import 'archive_screen.dart';
 import 'compose_screen.dart';
@@ -206,6 +207,55 @@ class _HomeShellState extends State<HomeShell> {
     return session.signedIn && session.syncToken != null;
   }
 
+  /// Signs out — after giving the queue one chance to reach the server, and
+  /// after asking if it still could not.
+  ///
+  /// Sign-out wipes the outbox (main.dart does it on the signed-in→out edge,
+  /// however sign-out was reached), and nothing syncs between a save and the
+  /// next app resume. So "record something, sign out" — an ordinary sequence
+  /// — used to delete that entry's create op before the server ever saw it,
+  /// silently and for good: the entry stays on the phone but has no way back
+  /// into the queue, since signing back in adopts nothing for an account that
+  /// has synced before. The flush closes the common case; the question covers
+  /// the offline one.
+  Future<void> _signOut() async {
+    final session = context.read<Session>();
+    final sync = context.read<SyncService>();
+
+    if (sync.enabled) {
+      await sync.syncNow();
+      if (!mounted) return;
+      final left = sync.pendingCount;
+      if (left > 0) {
+        final anyway = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('$left ${left == 1 ? 'entry isn\u2019t' : 'entries aren\u2019t'} backed up yet'),
+            content: const Text(
+              'signing out now drops them from the queue — they stay on this '
+              'phone, but they never reach your backup.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('stay signed in'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: TextButton.styleFrom(foregroundColor: ctx.colors.danger),
+                child: const Text('sign out anyway'),
+              ),
+            ],
+          ),
+        );
+        if (anyway != true || !mounted) return;
+      }
+    }
+    // Clearing what the account left behind — the filter, the sort, the
+    // outbox — belongs to main.dart's session listener, not here.
+    await session.signOut();
+  }
+
   void _compose() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const ComposeScreen()),
@@ -314,13 +364,7 @@ class _HomeShellState extends State<HomeShell> {
                     case _Overflow.export:
                       _export();
                     case _Overflow.signOut:
-                      // Just the sign-out. Clearing what the last account left
-                      // behind — the filter, the sort, the outbox — belongs to
-                      // main.dart, which watches the session and does it on the
-                      // signed-in→out edge however sign-out was reached. Doing
-                      // it here as well only meant it happened twice on the one
-                      // path a button can reach.
-                      context.read<Session>().signOut();
+                      _signOut();
                     case _Overflow.deleteAccount:
                       _deleteAccount();
                   }

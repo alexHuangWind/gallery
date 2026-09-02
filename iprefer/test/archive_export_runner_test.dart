@@ -152,9 +152,12 @@ void main() {
       onOutcome: reported.add,
     );
 
-    // The failure is reported, not thrown: the caller shows one sentence.
-    expect(outcome.status, ExportStatus.failed);
-    expect(reported.last.status, ExportStatus.failed);
+    // The archive packed; only the sheet failed to open, which is the OS's
+    // to explain. Reporting a *second* outcome here told the person their
+    // archive "couldn't pack" seconds after being told it had — and broke
+    // the promise that onOutcome fires exactly once.
+    expect(outcome.status, ExportStatus.packed);
+    expect(reported.map((o) => o.status), [ExportStatus.packed]);
     // Otherwise every refused sheet leaves a second copy of the whole archive
     // in a cache directory iOS does not reliably reclaim.
     expect(workDir().existsSync(), isFalse);
