@@ -10,6 +10,7 @@ import 'package:iprefer/theme.dart';
 import 'package:iprefer/widgets/entry_chip.dart';
 import 'package:iprefer/widgets/on_this_day.dart';
 import 'package:iprefer/widgets/sort_bar.dart';
+import 'package:iprefer/widgets/tag_filter_bar.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
@@ -54,8 +55,23 @@ void main() {
         createdAt: DateTime(2025, 8, 25, 9),
       );
 
-  Future<void> seed(WidgetTester tester, String id) => tester.runAsync(
-        () => store.applyRemoteCreate(entryOf(id)),
+  Future<void> seed(
+    WidgetTester tester,
+    String id, {
+    List<String> tags = const [],
+  }) =>
+      tester.runAsync(
+        () => store.applyRemoteCreate(
+          tags.isEmpty
+              ? entryOf(id)
+              : Entry(
+                  id: id,
+                  localPath: '$id.jpg',
+                  text: 'thing $id',
+                  createdAt: DateTime(2026, 8, 20),
+                  tags: tags,
+                ),
+        ),
       );
 
   /// A 360 dp phone — the narrowest width worth supporting, and the one the
@@ -134,6 +150,35 @@ void main() {
 
     expect(find.byType(EntryStrip), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the tag strip is exactly 44 tall at ordinary type size',
+      (tester) async {
+    await seed(tester, 'a', tags: const ['flowers']);
+    final view = ArchiveView(getFix: ({bool prompt = false}) async => null);
+    addTearDown(view.dispose);
+
+    await pump(tester, const TagFilterBar(), scale: 1.0, view: view);
+
+    expect(tester.getSize(find.byType(TagFilterBar)).height, 44.0);
+  });
+
+  testWidgets('the tag strip grows with the type instead of clipping it',
+      (tester) async {
+    // Seen on a simulator at the largest accessibility size: the strip stayed
+    // 44 tall while its labels did not, and the top and bottom of every tag
+    // were cut off.
+    await seed(tester, 'a', tags: const ['flowers']);
+    final view = ArchiveView(getFix: ({bool prompt = false}) async => null);
+    addTearDown(view.dispose);
+
+    await pump(tester, const TagFilterBar(), scale: 3.0, view: view);
+
+    expect(tester.takeException(), isNull);
+    final strip = tester.getRect(find.byType(TagFilterBar));
+    final label = tester.getRect(find.text('flowers'));
+    expect(label.top, greaterThanOrEqualTo(strip.top));
+    expect(label.bottom, lessThanOrEqualTo(strip.bottom));
   });
 
   testWidgets('the sort bar scrolls rather than overflowing', (tester) async {

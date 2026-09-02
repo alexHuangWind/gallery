@@ -25,8 +25,17 @@ class TagFilterBar extends StatelessWidget {
     final tags = context.read<EntryStore>().tagsByUse;
     final active = view.effective(tags);
 
+    // A horizontal ListView has no cross-axis extent of its own, so the strip
+    // has to be told how tall it is — and 44 is only right at ordinary type
+    // size. At the largest accessibility setting the chip's label alone is
+    // taller than that and the top and bottom of every tag were clipped off.
+    // Scaled by how much the chip's own type grew, not by scaling 44 (the
+    // platform scaler is a curve; a "44 pt font" barely moves under it).
+    final scaler = MediaQuery.textScalerOf(context);
+    final growth = scaler.scale(_Chip.fontSize) / _Chip.fontSize;
+
     return SizedBox(
-      height: 44,
+      height: 44 * growth,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -58,6 +67,9 @@ class TagFilterBar extends StatelessWidget {
 }
 
 class _Chip extends StatelessWidget {
+  /// The label size, shared with the strip's height calculation above.
+  static const double fontSize = 13;
+
   const _Chip({
     required this.label,
     required this.selected,
@@ -95,7 +107,7 @@ class _Chip extends StatelessWidget {
           child: Text.rich(
             TextSpan(
               text: label,
-              style: TextStyle(fontSize: 13, color: fg),
+              style: TextStyle(fontSize: fontSize, color: fg),
               children: [
                 if (count != null)
                   TextSpan(
