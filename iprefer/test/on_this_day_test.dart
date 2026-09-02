@@ -5,14 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
 import 'package:iprefer/data/entry_store.dart';
 import 'package:iprefer/models/entry.dart';
 import 'package:iprefer/theme.dart';
 import 'package:iprefer/widgets/entry_chip.dart';
 import 'package:iprefer/widgets/on_this_day.dart';
-import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+
+import 'support/harness.dart';
 
 /// The banner only appears on an anniversary, so a device can't show it on
 /// demand — the date seam is what makes these states reachable at all.
@@ -20,28 +20,18 @@ import 'package:provider/provider.dart';
 /// The last test renders the real thing to a PNG so the layout can be looked
 /// at rather than only asserted about.
 void main() {
-  late Directory tempDir;
-  late Box<Entry> box;
+  late TestEnv env;
   late EntryStore store;
-  late String photosRoot;
   var seq = 0;
 
   final today = DateTime(2026, 8, 25, 14);
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('iprefer_on_this_day_test');
-    Hive.init(tempDir.path);
-    if (!Hive.isAdapterRegistered(1)) Hive.registerAdapter(EntryAdapter());
-    box = await Hive.openBox<Entry>('entries_${seq++}');
-    photosRoot = p.join(tempDir.path, 'photos');
-    Directory(photosRoot).createSync(recursive: true);
-    store = EntryStore.forTest(box, photosRoot: photosRoot);
+    env = await TestEnv.create('iprefer_on_this_day_test');
+    store = await env.store(withOutbox: false);
   });
 
-  tearDown(() async {
-    await Hive.deleteFromDisk();
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-  });
+  tearDown(() => env.dispose());
 
   Future<void> seed(WidgetTester tester, DateTime when, String text) {
     return tester.runAsync(() async {

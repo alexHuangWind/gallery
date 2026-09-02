@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -364,7 +366,10 @@ class _HomeShellState extends State<HomeShell> {
                     case _Overflow.export:
                       _export();
                     case _Overflow.signOut:
-                      _signOut();
+                      // Not awaited: onSelected is void Function(T), and the
+                      // shell reacts to Session's notification, not to this
+                      // call returning.
+                      unawaited(_signOut());
                     case _Overflow.deleteAccount:
                       _deleteAccount();
                   }

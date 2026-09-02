@@ -1,0 +1,47 @@
+name: iPrefer
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  flutter:
+    name: flutter
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: iprefer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          # iprefer/pubspec.yaml pins a range (>=3.3.0 <4.0.0), not an exact
+          # SDK version, so there is nothing narrower to pin here.
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      # This will fail until a separate formatting-only commit lands — the
+      # tree is not `dart format`-clean yet (see the lint/format cleanup
+      # tracked separately from this CI change). Flip continue-on-error to
+      # false once that commit is in.
+      - run: dart format --output=none --set-exit-if-changed lib test
+        continue-on-error: true
+      - run: flutter test
+
+  server:
+    name: server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: iprefer/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      # npm test self-boots a local `wrangler dev` (backed by local D1/SQLite,
+      # no Cloudflare account) and tears it down again in posttest — verified
+      # to run headless with no `wrangler login` needed, so it runs for real
+      # here rather than falling back to typecheck-only.
+      - run: npm test
